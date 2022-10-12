@@ -1,0 +1,701 @@
+"""
+created by gsnoep on 11 August 2022, with contributions from aho
+
+Module to handle any and all methods related to magnetic equilibrium data
+
+The Equilibrium class can:
+- read and write magnetic equilibria files (only eqdsk g-files for now),
+- add derived quantities (e.g. phi, rho_tor, rho_pol, etc.) to the Equilibrium, 
+- add flux surfaces traces (shaping parameters included), 
+- map 1D profiles with a magnetics derived coordinate basis on the Equilibrium,
+- refine the complete Equilibrium by interpolating the R,Z basis .
+"""
+
+# imports
+import os
+import re
+import copy
+import numpy as np
+import time
+
+from scipy import interpolate, integrate
+from sys import stdout
+import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import axes3d
+
+from . import tracer
+from .localequilibrium import LocalEquilibrium
+from .utils import *
+
+
+class Equilibrium():
+    """
+    Class to handle any and all data related to the magnetic equilibrium in a magnetic confinement fusion device.
+    """
+    def __init__(self):
+        self.raw = {} # storage for all raw eqdsk data
+        self.derived = {} # storage for all data derived from eqdsk data
+        self.fluxsurfaces = {} # storage for all data related to flux surfaces
+        # specify the eqdsk file formate, based on 'G EQDSK FORMAT - L Lao 2/7/97'
+        self._eqdsk_format = {
+            0:{'vars':['case','idum','nw','nh'],'size':[4]},
+            1:{'vars':['rdim', 'zdim', 'rcentr', 'rleft', 'zmid'],'size':[5]},
+            2:{'vars':['rmaxis', 'zmaxis', 'simag', 'sibry', 'bcentr'],'size':[5]},
+            3:{'vars':['current', 'simag2', 'xdum', 'rmaxis2', 'xdum'],'size':[5]},
+            4:{'vars':['zmaxis2', 'xdum', 'sibry2', 'xdum', 'xdum'],'size':[5]},
+            5:{'vars':['fpol'],'size':['nw']},
+            6:{'vars':['pres'],'size':['nw']},
+            7:{'vars':['ffprim'],'size':['nw']},
+            8:{'vars':['pprime'],'size':['nw']},
+            9:{'vars':['psirz'],'size':['nh','nw']},
+            10:{'vars':['qpsi'],'size':['nw']},
+            11:{'vars':['nbbbs','limitr'],'size':[2]},
+            12:{'vars':['rbbbs','zbbbs'],'size':['nbbbs']},
+            13:{'vars':['rlim','zlim'],'size':['limitr']},
+        }
+        self._sanity_values = ['rmaxis','zmaxis','simag','sibry'] # specify the sanity values used for consistency check of eqdsk file
+        self._max_values = 5 # maximum number of values per line
+
+    ## I/O functions
+    def read_geqdsk(self,f_path=None,add_derived=False):
+        """Read an eqdsk g-file from file into `Equilibrium` object
+
+        Args:
+            `f_path` (str): the path to the eqdsk g-file, including the file name (!).
+            `add_derived` (bool): [True] also add derived quantities (e.g. phi, rho_tor) to the `Equilibrium` object upon reading the g-file, or [False, default] not.
+
+        Returns:
+            [default] self
+        
+        Raises:
+            ValueError: Raise an exception when no `f_path` is provided
+        """
+        print('Reading eqdsk g-file to Equilibrium...')
+
+        # check if eqdsk file path is provided and if it exists
+        if f_path is None or not os.path.isfile(f_path):
+            raise ValueError('Invalid file or path provided!')
+            return
+        
+        # read the g-file
+        with open(f_path,'r') as file:
+            lines = file.readlines()
+        
+        if lines:
+            # start at the top of the file
+            current_row = 0
+            # go through the eqdsk format key by key and collect all the values for the vars in each format row
+            for key in self._eqdsk_format:
+                if current_row < len(lines):
+                    # check if the var size is a string refering to a value to be read from the eqdsk file and backfill it, for loop for multidimensional vars
+                    for i,size in enumerate(self._eqdsk_format[key]['size']):
+                        if isinstance(size,str):
+                            self._eqdsk_format[key]['size'][i] = self.raw[size]
+
+                    # compute the row the current eqdsk format key ends
+                    if len(self._eqdsk_format[key]['vars']) != np.prod(self._eqdsk_format[key]['size']):
+                        end_row = current_row + int(np.ceil(len(self._eqdsk_format[key]['vars'])*np.prod(self._eqdsk_format[key]['size'])/self._max_values))
+                    else:
+                        end_row = current_row + int(np.ceil(np.prod(self._eqdsk_format[key]['size'])/self._max_values))
+
+                    # check if there are values to be collected
+                    if end_row > current_row:
+                        _lines = lines[current_row:end_row]
+                        for i_row, row in enumerate(_lines):
+                            try:
+                                # split the row string into separate values by ' ' as delimiter, adding a space before a minus sign if it is the delimiter
+                                values = list(filter(None,re.sub(r'(?<![Ee])-',' -',row).rstrip('\n').split(' ')))
+                                # select all the numerical values in the list of sub-strings of the current row, but keep them as strings so the fortran formatting remains
+                                numbers = [j for i in [number for number in (re.findall(r'^(?![A-Z]).*-?\ *[0-9]+\.?[0-9]*(?:[Ee]\ *[-+]?\ *[0-9]+)?', value) for value in values)] for j in i]
+                                # select all the remaining sub-strings and store them in a separate list
+                                strings = [value for value in values if value not in numbers]
+                                # handle the exception of the first line where in the case description numbers and strings can be mixed
+                                if current_row == 0:
+                                    numbers = numbers[-3:]
+                                    strings = [string for string in values if string not in numbers] 
+                                # convert the list of numerical sub-strings to their actual int or float value and collate the strings in a single string
+                                numbers = [number(value) for value in numbers]
+                                strings = ' '.join(strings)
+                                _values = numbers
+                                if strings:
+                                    _values.insert(0,strings)
+                            except:
+                                _values = row.strip()
+                            _lines[i_row] = _values
+                        # unpack all the values between current_row and end_row in the eqdsk file and flatten the resulting list of lists to a list
+                        values = [value for row in _lines for value in row]
+
+                        # handle the exception of len(eqdsk_format[key]['vars']) > 1 and the data being stored in value pairs 
+                        if len(self._eqdsk_format[key]['vars']) > 1 and len(self._eqdsk_format[key]['vars']) != self._eqdsk_format[key]['size'][0]:
+                            # make a shadow copy of values
+                            _values = copy.deepcopy(values)
+                            # empty the values list
+                            values = []
+                            # collect all the values belonging to the n-th variable in the format list and remove them from the shadow value list until empty
+                            for j in range(len(self._eqdsk_format[key]['vars']),0,-1):
+                                values.append(np.array(_values[0::j]))
+                                _values = [value for value in _values if value not in values[-1]]
+                        # store and reshape the values in a np.array() in case eqdsk_format[key]['size'] > max_values
+                        elif self._eqdsk_format[key]['size'][0] > self._max_values:
+                            values = [np.array(values).reshape(self._eqdsk_format[key]['size'])]
+                        # store the var value pairs in the eqdsk dict
+                        self.raw.update({var:values[k] for k,var in enumerate(self._eqdsk_format[key]['vars'])})
+                    # update the current position in the 
+                    current_row = end_row
+            
+            # store any remaining lines as a comment, in case of CHEASE/LIUQE
+            if current_row < len(lines):
+                comment_lines = []
+                for line in lines[current_row+1:]:
+                    if isinstance(line,list):
+                        comment_lines.append(' '.join([str(text) for text in line]))
+                    else:
+                        if line.strip():
+                            comment_lines.append(str(line))
+                self.raw['comment'] = '\n'.join(comment_lines)
+
+            # sanity check the eqdsk values
+            for key in self._sanity_values:
+                # find the matching sanity key in eqdsk
+                sanity_pair = [keypair for keypair in self.raw.keys() if keypair.startswith(key)][1]
+                #print(sanity_pair)
+                if self.raw[key]!=self.raw[sanity_pair]:
+                    raise ValueError('Inconsistent '+key+': %7.4g, %7.4g'%(self.raw[key], self.raw[sanity_pair])+'. CHECK YOUR EQDSK FILE!')
+
+            if add_derived:
+                self.add_derived()
+            
+            return self
+    
+    def write_geqdsk(self,f_path=None):
+        """ Write an `Equilibrium` object to an eqdsk g-file 
+
+        Args:
+            f_path (str): the target path of generated eqdsk g-file, including the file name (!).
+        
+        Returns:
+            
+        """
+        print('Writing Equilibrium to eqdsk g-file...')
+
+        if self.raw:
+            if not isinstance(f_path, str):
+                raise TypeError("filepath field must be a string. EQDSK file write aborted.")
+
+            maxv = int(self._max_values)
+
+            if os.path.isfile(f_path):
+                print("{} exists, overwriting file with EQDSK file!".format(f_path))
+            eq = {"xdum": 0.0}
+            for linenum in self._eqdsk_format:
+                if "vars" in self._eqdsk_format[linenum]:
+                    for key in self._eqdsk_format[linenum]["vars"]:
+                        if key in self.raw:
+                            eq[key] = copy.deepcopy(self.derived[key])
+                        elif key in ["nbbbs","limitr","rbbbs","zbbbs","rlim","zlim"]:
+                            eq[key] = None
+                            if key in self.derived:
+                                eq[key] = copy.deepcopy(self.derived[key])
+                        else:
+                            raise TypeError("%s field must be specified. EQDSK file write aborted." % (key))
+            if eq["nbbbs"] is None or eq["rbbbs"] is None or eq["zbbbs"] is None:
+                eq["nbbbs"] = 0
+                eq["rbbbs"] = []
+                eq["zbbbs"] = []
+            if eq["limitr"] is None or eq["rlim"] is None or eq["zlim"] is None:
+                eq["limitr"] = 0
+                eq["rlim"] = []
+                eq["zlim"] = []
+
+            eq["xdum"] = 0.0
+            with open(f_path, 'w') as ff:
+                ff.write("%-48s%4d%4d%4d\n" % (eq["case"], eq["idum"], eq["nw"], eq["nh"]))
+                ff.write("%16.9E%16.9E%16.9E%16.9E%16.9E\n" % (eq["rdim"], eq["zdim"], eq["rcentr"], eq["rleft"], eq["zmid"]))
+                ff.write("%16.9E%16.9E%16.9E%16.9E%16.9E\n" % (eq["rmaxis"], eq["zmaxis"], eq["simag"], eq["sibry"], eq["bcentr"]))
+                ff.write("%16.9E%16.9E%16.9E%16.9E%16.9E\n" % (eq["current"], eq["simag"], eq["xdum"], eq["rmaxis"], eq["xdum"]))
+                ff.write("%16.9E%16.9E%16.9E%16.9E%16.9E\n" % (eq["zmaxis"], eq["xdum"], eq["sibry"], eq["xdum"], eq["xdum"]))
+                for ii in range(0, len(eq["fpol"])):
+                    ff.write("%16.9E" % (eq["fpol"][ii]))
+                    if (ii + 1) % maxv == 0 and (ii + 1) != len(eq["fpol"]):
+                        ff.write("\n")
+                ff.write("\n")
+                for ii in range(0, len(eq["pres"])):
+                    ff.write("%16.9E" % (eq["pres"][ii]))
+                    if (ii + 1) % maxv == 0 and (ii + 1) != len(eq["pres"]):
+                        ff.write("\n")
+                ff.write("\n")
+                for ii in range(0, len(eq["ffprim"])):
+                    ff.write("%16.9E" % (eq["ffprim"][ii]))
+                    if (ii + 1) % maxv == 0 and (ii + 1) != len(eq["ffprim"]):
+                        ff.write("\n")
+                ff.write("\n")
+                for ii in range(0, len(eq["pprime"])):
+                    ff.write("%16.9E" % (eq["pprime"][ii]))
+                    if (ii + 1) % maxv == 0 and (ii + 1) != len(eq["pprime"]):
+                        ff.write("\n")
+                ff.write("\n")
+                kk = 0
+                for ii in range(0, eq["nh"]):
+                    for jj in range(0, eq["nw"]):
+                        ff.write("%16.9E" % (eq["psirz"][ii, jj]))
+                        if (kk + 1) % maxv == 0 and (kk + 1) != (eq["nh"] * eq["nw"]):
+                            ff.write("\n")
+                        kk = kk + 1
+                ff.write("\n")
+                for ii in range(0, len(eq["qpsi"])):
+                    ff.write("%16.9E" % (eq["qpsi"][ii]))
+                    if (ii + 1) % maxv == 0 and (ii + 1) != len(eq["qpsi"]):
+                        ff.write("\n")
+                ff.write("\n")
+                ff.write("%5d%5d\n" % (eq["nbbbs"], eq["limitr"]))
+                kk = 0
+                for ii in range(0, eq["nbbbs"]):
+                    ff.write("%16.9E" % (eq["rbbbs"][ii]))
+                    if (kk + 1) % maxv == 0 and (ii + 1) != eq["nbbbs"]:
+                        ff.write("\n")
+                    kk = kk + 1
+                    ff.write("%16.9E" % (eq["zbbbs"][ii]))
+                    if (kk + 1) % maxv == 0 and (ii + 1) != eq["nbbbs"]:
+                        ff.write("\n")
+                    kk = kk + 1
+                ff.write("\n")
+                kk = 0
+                for ii in range(0, eq["limitr"]):
+                    ff.write("%16.9E" % (eq["rlim"][ii]))
+                    if (kk + 1) % maxv == 0 and (kk + 1) != eq["limitr"]:
+                        ff.write("\n")
+                    kk = kk + 1
+                    ff.write("%16.9E" % (eq["zlim"][ii]))
+                    if (kk + 1) % maxv == 0 and (kk + 1) != eq["limitr"]:
+                        ff.write("\n")
+                    kk = kk + 1
+                ff.write("\n")
+            print('Output EQDSK file saved as {}.'.format(f_path))
+
+        else:
+            print("g-eqdsk could not be written")
+
+        return
+
+    ## physics functions
+    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,incl_analytic_geo=False,incl_B=False,tracer_diag=None):
+        """Add quantities derived from the raw `Equilibrium.read_geqdsk()` output, such as phi, rho_pol, rho_tor to the `Equilibrium` object.
+        Can also be called directly if `f_path` is defined.
+
+        Args:
+            `f_path` (str): path to the eqdsk g-file, including the file name (!)
+            `refine` (int): the number of desired `Equilibrium` grid points, if the native refine is lower than this value, it is refined using the `refine()` method
+            `just_derived` (bool): [True] return only the derived quantities dictionary, or [False, default] return the `Equilibrium` object
+            `incl_fluxsurfaces` (bool): include fluxsurface tracing output in the added derived quantities
+            `incl_analytic_geo` (bool): include the analytical flux surface Miller shaping parameters as defined in literature. Defaults to False.
+
+        Returns:
+            self or dict if just_derived
+
+        Raises:
+            ValueError: Raises an exception when `Equilibrium.raw` is empty and no `f_path` is provided
+        """
+
+        print('Adding derived quantities to Equilibrium...')
+
+        if self.raw == {}:
+            try:
+                self.read_geqdsk(f_path=f_path)
+            except:
+                raise ValueError('Unable to read provided EQDSK file, check file and/or path')
+
+        # introduce shorthands for data and derived locations for increased readability
+        raw = self.raw
+        derived = self.derived
+
+        # check refine requirements
+        if refine:
+            self.refine = refine
+            self.refine_equilibrium(nw=refine*raw['nw'],nh=refine*raw['nh'])
+        else:
+            derived.update(self.raw)
+
+        # compute R and Z grid vectors
+        derived['R'] = np.array([derived['rleft'] + i*(derived['rdim']/(derived['nw']-1)) for i in range(derived['nw'])])
+        derived['Z'] = np.array([derived['zmid'] - 0.5*derived['zdim'] + i*(derived['zdim']/(derived['nh']-1)) for i in range(derived['nh'])])
+
+        # equidistant psi grid
+        derived['psi'] = np.linspace(derived['simag'],derived['sibry'],derived['nw'])
+
+        # corresponding rho_pol grid
+        psi_norm = (derived['psi'] - derived['simag'])/(derived['sibry'] - derived['simag'])
+        derived['rho_pol'] = np.sqrt(psi_norm)
+
+        if 'rbbbs' in raw and 'zbbbs' in derived:
+            # ensure the boundary coordinates are stored from midplane lfs to midplane hfs
+            i_split = find(np.max(derived['rbbbs']),self.derived['rbbbs'])
+            derived['rbbbs'] = np.hstack((derived['rbbbs'][i_split:],derived['rbbbs'][:i_split]))
+            derived['zbbbs'] = np.hstack((derived['zbbbs'][i_split:],derived['zbbbs'][:i_split]))
+            
+            # find the indexes of 'zmaxis' on the high field side (hfs) and low field side (lfs) of the separatrix
+            i_zmaxis_hfs = int(len(derived['zbbbs'])/3)+find(derived['zmaxis'],derived['zbbbs'][int(len(derived['zbbbs'])/3):int(2*len(derived['zbbbs'])/3)])
+            i_zmaxis_lfs = int(2*len(derived['zbbbs'])/3)+find(derived['zmaxis'],derived['zbbbs'][int(2*len(derived['zbbbs'])/3):])
+            
+            # find the index of 'zmaxis' in the R,Z grid
+            i_zmaxis = find(derived['zmaxis'],derived['Z'])
+
+            # find indexes of separatrix on HFS, magnetic axis, separatrix on LFS in R
+            i_R_hfs = find(derived['rbbbs'][i_zmaxis_hfs],derived['R'][:int(len(derived['R'])/2)])
+            i_rmaxis = find(derived['rmaxis'],derived['R'])
+            i_R_lfs = int(len(derived['R'])/2)+find(derived['rbbbs'][i_zmaxis_lfs],derived['R'][int(len(derived['R'])/2):])
+
+            # HFS and LFS R and psirz
+            R_hfs = derived['R'][i_R_hfs:i_rmaxis]
+            R_lfs = derived['R'][i_rmaxis:i_R_lfs]
+            psirzmaxis_hfs = derived['psirz'][i_zmaxis,i_R_hfs:i_rmaxis]
+            psirzmaxis_lfs = derived['psirz'][i_zmaxis,i_rmaxis:i_R_lfs]
+
+            # nonlinear R grid at 'zmaxis' based on equidistant psi grid for 'fpol', 'pres', 'ffprim', 'pprime' and 'qpsi'
+            derived['R_psi_hfs'] = interpolate.interp1d(psirzmaxis_hfs,R_hfs,fill_value='extrapolate')(derived['psi'][::-1])
+            derived['R_psi_lfs'] = interpolate.interp1d(psirzmaxis_lfs,R_lfs,fill_value='extrapolate')(derived['psi'])
+        
+            # find the R,Z values of the x-point, !TODO: should add check for second x-point in case of double-null equilibrium
+            i_xpoint_Z = find(np.min(derived['zbbbs']),derived['zbbbs']) # assuming lower null, JET-ILW shape for now
+            derived['R_x'] = derived['rbbbs'][i_xpoint_Z]
+            derived['Z_x'] = derived['zbbbs'][i_xpoint_Z]
+
+        # compute LFS phi (toroidal flux in W/rad) grid from integrating q = d psi/d phi
+        derived['phi'] = integrate.cumtrapz(derived['qpsi'],derived['psi'],initial=0)
+
+        # construct the corresponding rho_tor grid
+        if derived['phi'][-1] !=0:
+            phi_norm = derived['phi']/derived['phi'][-1] # as phi[0] = 0 this term is dropped
+        else:
+            phi_norm = np.ones_like(derived['phi'])*np.NaN
+            print('Could not construct valid rho_tor')
+        derived['rho_tor']  = np.sqrt(phi_norm)
+
+        # compute the rho_pol and rho_tor grids corresponding to the R,Z grid
+        psirz_norm = abs(derived['psirz'] - derived['simag'])/(derived['sibry'] - derived['simag'])
+        derived['rhorz_pol'] = np.sqrt(psirz_norm)
+
+        derived['phirz'] = interpolate.interp1d(derived['psi'],derived['phi'],kind=5,bounds_error=False)(derived['psirz'])
+        phirz_norm = abs(derived['phirz']/(derived['phi'][-1]))
+        derived['rhorz_tor'] = np.sqrt(phirz_norm)
+
+        # compute the toroidal current density
+        derived['j_tor'] = derived['R_psi_lfs']*derived['pprime']+derived['ffprim']/derived['R_psi_lfs']
+
+        # compute the poloidal magnetic flux density
+        R,Z = np.meshgrid(derived['R'],derived['Z'])
+        [derived['dpsirzdz'],derived['dpsirzdr']] = np.gradient(derived['psirz'],derived['Z'],derived['R'],edge_order=2)
+        derived['B_r'] = derived['dpsirzdz']/R
+        derived['B_z'] = -derived['dpsirzdr']/R
+        derived['B_pol_rz'] = np.sqrt(derived['B_r']**2 + derived['B_z']**2)
+
+        # compute the toroidal magnetic flux density
+        derived['B_tor_rz'] = interpolate.interp1d(derived['psi'],derived['fpol'],bounds_error=False,fill_value='extrapolate')(derived['psirz'])/R
+
+        if incl_fluxsurfaces:
+            self.add_fluxsurfaces(refine=refine,incl_analytic_geo=incl_analytic_geo,incl_B=incl_B,tracer_diag=tracer_diag)
+              
+        if just_derived:
+            return self.derived 
+        else:
+            return self
+
+    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,incl_analytic_geo=False,incl_B=False,tracer_diag=None,verbose=False):
+        """Add flux surfaces to an `Equilibrium`.
+        
+        Args:
+            `raw` (dict, optional):  the raw `Equilibrium` data, [default] self.raw if None is set.
+            `derived` (dict, optional): the derived `Equilibrium` quantities, [default] self.derived if None is set.
+            `fluxsurfaces` (dict, optional): the `Equilibrium` flux surface data, each key a variable containing an array, [default] self.fluxsurfaces if None is set.
+            `incl_analytic_geo` (bool, optional): [True] include the flux surface Miller shaping parameters delta, kappa and zeta, or [False, default] not.
+
+        Returns:
+            self.
+        """
+        print('Adding fluxsurfaces to Equilibrium...')
+
+        # check if self.fluxsurfaces contains all the flux surfaces specified by derived['rho_tor'] already
+        if self.fluxsurfaces and self.derived and len(self.fluxsurfaces['rho_tor']) == len(self.derived['rho_tor']):
+            # skip
+            print('Skipped adding flux surfaces to Equilibrium as it already contains fluxsurfaces')
+        else:
+            with np.errstate(divide='ignore'):
+                # set the default locations if None is specified
+                raw = self.raw
+                derived = self.derived
+                if not self.derived:
+                    self.add_derived()
+                fluxsurfaces = self.fluxsurfaces
+
+                if refine and derived['nw'] != refine*derived['nw']:
+                    self.refine(nw=refine*derived['nw'],nh=refine*derived['nh'],self_consistent=False)
+                    self.add_derived()
+                
+                R = copy.deepcopy(derived['R'])
+                Z = copy.deepcopy(derived['Z'])
+                psirz = copy.deepcopy(derived['psirz'])
+
+                if tracer_diag == 'mesh':
+                    fig = plt.figure()
+                    ax = fig.add_subplot(projection='3d')
+                    R_,Z_ = np.meshgrid(R,Z)
+                    ax.plot_wireframe(R_,Z_,psirz, rstride=10, cstride=10)
+                    ax.set_xlabel('R [m]')
+                    ax.set_ylabel('Z [m]')
+                    ax.set_zlabel('$\\Psi$')
+                    plt.show()
+
+                # find the approximate location of the magnetic axis on the psirz map
+                i_rmaxis = find(self.derived['rmaxis'],R)
+                i_zmaxis = find(self.derived['zmaxis'],Z)
+
+                if tracer_diag:
+                    plt.figure()
+                    if tracer_diag == 'fs':
+                        plt.plot(derived['rmaxis'],derived['zmaxis'],'bx')
+
+                # add the flux surface data for rho_tor > 0
+                if not x:
+                    if x_label in self.derived:
+                        x_list = self.derived[x_label][1:]
+                    else:
+                        x_list = self.derived['psi'][1:]
+                else:
+                    x_list = list(x)
+
+                tracer_timing = 0.
+                analytic_timing = 0.
+                for i_x_fs,x_fs in enumerate(x_list):
+                    # print a progress %
+                    stdout.write('\r {}% completed'.format(round(100*(find(x_fs,x_list)+1)/len(x_list))))
+                    stdout.flush()
+                    # check that rho stays inside the lcfs
+                    if x_fs > 0 and x_fs < 0.999:
+                        # compute the psi level of the flux surface
+                        psi_fs = interpolate.interp1d(derived[x_label],derived['psi'])(x_fs)
+                        q_fs = interpolate.interp1d(derived[x_label],derived['qpsi'])(x_fs)
+                        fpol_fs = interpolate.interp1d(derived[x_label],derived['fpol'])(x_fs)
+                        
+                        # trace the flux surface contour and relabel the tracer output
+                        time0 = time.time()
+                        fs = tracer.contour(R,Z,psirz,psi_fs,derived['sibry'],i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag)
+                        tracer_timing += time.time()-time0
+                        fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
+                        if x_label != 'rho_tor' and 'rho_tor' in derived:
+                            fs.update({'rho_tor':interpolate.interp1d(derived[x_label],derived['rho_tor'])(x_fs)})
+                        keys = copy.deepcopy(list(fs.keys()))
+                        for key in keys:
+                            if 'X' in key or 'Y' in key:
+                                _key = (key.replace('X','R')).replace('Y','Z')
+                                fs[_key] = fs.pop(key)
+                        del fs['label']
+                        del fs['level']
+
+                        if incl_analytic_geo:
+                            time1 = time.time()
+                            fs['miller_geo'] = LocalEquilibrium.extract_analytic_geo(fs)
+                            analytic_timing += time.time()-time1
+                        
+                        if incl_B:
+                            if isinstance(incl_B,list):
+                                _incl_B = incl_B[i_x_fs]
+                            else:
+                                _incl_B = incl_B
+                        else:
+                            _incl_B = False
+                        
+                        if _incl_B:
+                            # to speed up the Bpol interpolation generate a reduced Z,R mesh
+                            i_R_in = find(fs['R_in'],self.derived['R'])-2
+                            i_R_out = find(fs['R_out'],self.derived['R'])+2
+                            i_Z_min = find(fs['Z_min'],self.derived['Z'])-2
+                            i_Z_max = find(fs['Z_max'],self.derived['Z'])+2
+                            R_mesh,Z_mesh = np.meshgrid(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max])
+                            RZ_mesh = np.column_stack((Z_mesh.flatten(),R_mesh.flatten()))
+
+                            # interpolate Bpol and Btor
+                            B_pol_fs = interpolate.griddata(RZ_mesh,self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out].flatten(),(fs['Z'],fs['R']),method='cubic')
+                            #B_pol_fs = np.array([])
+                            #for i_R,RR in enumerate(fs['R']):
+                            #    B_pol_fs = np.append(B_pol_fs,interpolate.interp2d(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max],self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out],bounds_error=False,fill_value='extrapolate')(RR,fs['Z'][i_R]))
+                            B_tor_fs = interpolate.interp1d(self.derived['psi'],self.derived['fpol'],bounds_error=False)(psi_fs)/fs['R']
+
+                            fs.update({'Bpol':B_pol_fs, 'Btor':B_tor_fs, 'B':np.sqrt(B_pol_fs**2+B_tor_fs**2)})
+                        else:
+                            fs.update({'Bpol':np.array([]), 'Btor':np.array([]), 'B':np.array([])})
+                        
+                        fs = list_to_array(fs)
+
+                        # merge the flux surface data into the Equilibrium()
+                        merge_trees(fs,fluxsurfaces)
+                stdout.write('\n')
+                analytic_timing /= len(x_list)
+                tracer_timing /= len(x_list)
+
+                print('tracer time pp:{}'.format(tracer_timing))
+                print('analytic extraction time pp:{}'.format(analytic_timing))
+                if tracer_diag == 'fs':
+                    plt.show()
+
+                if not x:
+                    if 'rbbbs' in raw and 'zbbbs' in raw:
+                        # find the geometric center, minor radius and extrema of the lcfs manually
+                        lcfs = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
+                    else:
+                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
+                        derived.update({'rbbbs':lcfs['X'],'zbbbs':lcfs['Y'],'nbbbs':len(lcfs['X'])})
+                    if incl_analytic_geo:
+                        lcfs.update(self.extract_analytic_geo(fs=lcfs))
+                
+                    lcfs.update({x_label:x_fs, 'psi':psi_fs, 'q':derived['qpsi'][-1], 'fpol':derived['fpol'][-1]})
+                    if x_label != 'rho_tor' and 'rho_tor' in derived:
+                        lcfs.update({'rho_tor':interpolate.interp1d(derived[x_label],derived['rho_tor'])(x_fs)})
+                    keys = copy.deepcopy(list(lcfs.keys()))
+                    for key in keys:
+                        if 'X' in key or 'Y' in key:
+                            _key = (key.replace('X','R')).replace('Y','Z')
+                            lcfs[_key] = lcfs.pop(key)
+                    del lcfs['label']
+                    del lcfs['level']
+                    merge_trees(lcfs,fluxsurfaces)
+
+                    # add a zero at the start of all flux surface quantities and append the lcfs values to the end of the flux surface data
+                    for key in fluxsurfaces:
+                        if key in ['R','R0','R_Zmax','R_Zmin','R_in','R_out']:
+                            fluxsurfaces[key].insert(0,derived['rmaxis'])
+                        elif key in ['Z','Z0','Z_max','Z_min']:
+                            fluxsurfaces[key].insert(0,derived['zmaxis'])
+                        elif key in ['kappa','delta','zeta','s_kappa','s_delta','s_zeta']:
+                            fluxsurfaces[key].insert(0,fluxsurfaces[key][0])
+                        else:
+                            fluxsurfaces[key].insert(0,0.*fluxsurfaces[key][-1])
+
+                # add the midplane average geometric flux surface quantities to derived
+                derived['Ro'] = np.array(fluxsurfaces['R0'])
+                derived['Ro'][0] = derived['Ro'][1] # clear the starting zero
+                derived['R0'] = derived['Ro'][-1] # midplane average major radius of the lcfs
+                derived['Zo'] = np.array(fluxsurfaces['Z0'])
+                derived['Z0'] = derived['Zo'][-1] # average elevation of the lcfs
+                derived['r'] = np.array(fluxsurfaces['r'])
+                if x and 'rbbbs' and 'zbbbs' in raw:
+                    derived['a'] = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})['r']
+                else:
+                    derived['a'] = derived['r'][-1] # midplane average minor radius of the lcfs
+                derived['epsilon'] = derived['r']/derived['Ro']
+                derived['r/a'] = derived['r']/derived['a']
+
+                # add the midplane average major radius and elevation derivatives to derived
+                derived['dRodr'] = np.gradient(derived['Ro'],derived['r'])
+                derived['dZodr'] = np.gradient(derived['Zo'],derived['r'])
+
+                # add the magnetic shear to derived
+                derived['s'] = derived['r']*np.gradient(np.log(fluxsurfaces['q']),derived['r'],edge_order=2)
+
+                # add several magnetic field quantities to derived
+                derived['Bref_eqdsk'] = derived['fpol'][0]/derived['rmaxis']
+                derived['Bref_miller'] = fluxsurfaces['fpol']/derived['Ro']
+                #derived['B_unit'] = interpolate.interp1d(derived['r'],(1/derived['r'])*np.gradient(derived['phi'],derived['r'],edge_order=2))(derived['r'])
+                derived['B_unit'] = interpolate.interp1d(derived['r'],(fluxsurfaces['q']/derived['r'])*np.gradient(fluxsurfaces['psi'],derived['r'],edge_order=2))(derived['r'])
+                
+                # add beta and alpha, assuming the pressure profile included in the equilibrium and Bref=derived['Bref_eqdsk]
+                #derived['beta'] = 8*np.pi*1E-7*derived['pres']/(derived['Bref_eqdsk']**2)
+                #derived['alpha'] = -1*derived['qpsi']**2*derived['Ro']*np.gradient(derived['beta'],derived['r'])
+
+                if incl_analytic_geo:
+                    derived['miller_geo'] = list_to_array(copy.deepcopy(fluxsurfaces['miller_geo']))
+
+                    # compute the shear of the Turnbull-Miller shaping parameters
+                    derived['miller_geo']['s_kappa'] = derived['r']*np.gradient(np.log(derived['miller_geo']['kappa']),derived['r'],edge_order=2)
+                    derived['miller_geo']['s_delta'] = (derived['r']/np.sqrt(1-derived['miller_geo']['delta']**2))*np.gradient(derived['miller_geo']['delta'],derived['r'],edge_order=2)
+                    derived['miller_geo']['s_delta_ga'] = derived['r']*np.gradient(derived['miller_geo']['delta'],derived['r'],edge_order=2)
+                    derived['miller_geo']['s_zeta'] = derived['r']*np.gradient(derived['miller_geo']['zeta'],derived['r'],edge_order=2)
+                
+                return self
+
+    def map_on_equilibrium(self,x=None,y=None,x_label=None,interp_order=9,extrapolate=False):
+        """Map a 1D plasma profile on to the `x_label` radial coordinate basis of this `Equilibrium`.
+
+        Args:
+            `x` (array): vector of the radial basis of the existing profile in units of `x_label`.
+            `y` (array): vector of the 1D profile of the plasma quantity that is mapped on this `Equilibrium`.
+            `x_label` (str): label of the radial coordinate specification of `x`.
+            `interp_order` (float): the interpolation order used in the remapping of the 1D profile, [default] 9 based on experience.
+            `extrapolate` (bool): [True] use `fill_value` = 'extrapolate' in the interpolation, or [False, default] not.
+
+        Returns:
+            Two vectors, the x vector of `Equilibrium.derived` [`x_label`] and the y vector of the remapped 1D profile.
+        """
+
+        # remap the provided y profile, onto the x basis of x_label in this equilibrium
+        if extrapolate:
+            y_interpolated = interpolate.interp1d(x,y,kind=interp_order,bounds_error=False,fill_value='extrapolate')(self.derived[x_label])
+        else:
+            y_interpolated = interpolate.interp1d(x,y,kind=interp_order,bounds_error=False)(self.derived[x_label])
+        
+        return self.derived[x_label],y_interpolated
+    
+    def refine_equilibrium(self,nw=None,nh=None,nbbbs=None,interp_order=9,verbose=True):
+        """Refine the R,Z refine of the `Equilibrium` through interpolation, assuming a g-EQDSK file as origin.
+
+        Args:
+            `nw` (int): desired grid refine of the 1D profiles and 2D psi(R,Z) map radial coordinate.
+            `nh` (int): desired grid refine of the 2D psi(R,Z) map vertical coordinate.
+            `nbbbs` (int, optional): desired grid refine of the last closed flux surface plasma boundary trace.
+            `interp_order` (int, optional): the interpolation order used in the remapping of the 1D profiles, [default] 9 based on experience.
+            `retain_original` (bool, optional): [True] store the original raw g-EQDSK equilibrium data in `Equilibrium.original`, or [False, default] not.
+            `self_consistent` (bool, optional): [True, default] re-derive and re-trace all the existing additional data when applied to an existing `Equilibrium`, or [False] not.
+
+        Returns:
+            self
+
+        Raises:
+            ValueError: if the provided `nw` is smaller than the native refine of the `Equilibrium`.
+        """
+        if verbose:
+            print('Refining Equilibrium to {}x{}...'.format(nw,nw))
+        
+        old_w = np.linspace(0,1,self.raw['nw'])
+        old_h = np.linspace(0,1,self.raw['nh'])
+        if nw and nw > self.raw['nw']:
+            new_w = np.linspace(0,1,nw)
+            refine_w = True
+        else:
+            new_w = old_w
+            refine_w = False
+            #raise ValueError('Provided nw does not refine the equilibrium, provided:{} < exisiting:{}'.format(nw,self.derived['nw']))
+        if nh and nh > self.raw['nh']:
+            new_h = np.linspace(0,1,nh)
+            refine_h = True
+        else:
+            new_h = old_h
+            refine_h = False
+            #raise ValueError('Provided nh does not refine the equilibrium, provided:{} < exisiting:{}'.format(nh,self.derived['nh']))
+        if nbbbs and nbbbs > self.raw['nbbbs']:
+            pass
+        
+        for quantity in self.raw.keys():
+            if isinstance(self.raw[quantity],np.ndarray):
+                if refine_w and self.raw[quantity].size == old_w.size:
+                    self.derived[quantity] = interpolate.interp1d(old_w,self.raw[quantity],kind=interp_order)(new_w)
+                elif (refine_h or refine_w) and self.raw[quantity].size == old_w.size*old_h.size:
+                    _old_w,_old_h = np.meshgrid(old_w,old_h)
+                    old_hw = np.column_stack((_old_w.flatten(),_old_h.flatten()))
+                    _new_w,_new_h = np.meshgrid(new_w,new_h)
+                    self.derived[quantity] = interpolate.griddata(old_hw,self.raw[quantity].flatten(),(_new_w,_new_h),method='cubic')
+                    #self.derived[quantity] = interpolate.interp2d(old_w,old_h,self.raw[quantity],kind='quintic')(new_w,new_h)
+                else:
+                    self.derived[quantity] = copy.deepcopy(self.raw[quantity])
+            else:
+                self.derived[quantity] = copy.deepcopy(self.raw[quantity])
+        
+        self.derived['nw'] = nw
+        self.derived['nh'] = nh
+
+        return self
+
+    def plot_derived(self,):
+
+        return self
+    
+    def plot_fluxsurfaces(self,):
+
+        return self
