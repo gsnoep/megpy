@@ -1,5 +1,5 @@
 # MEGPy: Magnetic Equilibrium Geometry Python
-MEGPy is a tool for quick **extraction of local flux surface geometry** and visualisation of 2D magnetic equilibria used in magnetic confinement fusion research.
+MEGPy is a package for quick **extraction of (local) equilibrium quantities** and visualisation of 2D magnetic equilibria used in magnetic confinement fusion research.
 It offers both a command line interface (CLI) and Python API.
 
 # Getting started
@@ -31,8 +31,8 @@ To be added:
 - Miller eXtended Harmonic (MXH) [(doi)]()
 
 # Citation
-If you use MEGPy in your research, please cite [(bibtex)](https://www.github.com/FusionKit/megpy/citation.bib):
->G. Snoep, C. Bourdelle, J. Citrin, "Rapidly converging Turnbull-Miller flux surface parametrisation through nonlinear optimisation," TBD, (2022)
+If you use MEGPy in your research, please cite [(bibtex)](https://www.github.com/gsnoep/megpy/citation.bib):
+>G. Snoep, J.T.W. Koenders, C. Bourdelle, J. Citrin and JET contributors, "Rapid and accurate flux-surface parameterization through constrained nonlinear optimisation," TBD
 
 
                     .#&%%%-.
