@@ -237,7 +237,7 @@ class LocalEquilibrium():
             self.shape_bpol.append(self.eq.fluxsurfaces['fit_geo'][key][self.x_grid.index(self.x_loc)])
 
         if self.method in ['miller','turnbull','turnbull_tilt']:
-            self.Bp_param = self.bpol_param(self.shape_bpol, self.shape, self.theta, self.R_param[:-1], self.dpsidr)
+            self.Bp_param = self.bpol_param(self.shape, self.shape_bpol, self.theta, self.R_param[:-1], self.dpsidr)
             self.Bp_ref = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref[:-1]))
             self.shape_bpol_ref = copy.deepcopy(self.shape_bpol)
         if incl_analytic_geo:
@@ -266,7 +266,7 @@ class LocalEquilibrium():
             self.Z_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
             self.Bt_ref_geo  = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_ref_geo[:-1])
 
-            self.Bp_geo = self.turnbull_bp(self.shape_bpol_analytic, self.shape_analytic, self.theta, self.R_geo[:-1], self.dpsidr)
+            self.Bp_geo = self.turnbull_bp(self.shape_analytic, self.shape_bpol_analytic, self.theta, self.R_geo[:-1], self.dpsidr)
             self.Bp_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref_geo[:-1]))
 
         if opt_bpol:
@@ -285,11 +285,11 @@ class LocalEquilibrium():
             for i_key,key in enumerate(self.bpol_labels):
                 self.eq.fluxsurfaces['fit_geo'][key+'_opt'] = copy.deepcopy(self.shape_bpol[i_key])
         
-    # shape factor method Miller parameterisations
-    def miller(self,params,theta,norm=False):
-        # flux surface coordinate parameterisation from [Miller PoP 5 (1998)]
-        [R0,Z0,r,kappa,delta] = params
-        with np.errstate(invalid=='ignore'):
+    # local equilibrium parameterisations
+    def miller(self,shape,theta,norm=False):
+        # flux surface coordinate parameterisation from [Miller PoP 5 (1998)] with Z0 added
+        [R0,Z0,r,kappa,delta] = shape
+        with np.errstate(invalid='ignore'):
             x = np.arcsin(delta)
         theta_R = theta + x * np.sin(theta)
 
@@ -303,42 +303,57 @@ class LocalEquilibrium():
         
         return R_param, Z_param, theta_ref
 
-    def miller_bp(self,params,shape,theta,R,dPsi_dr,method='analytical'):
+    def miller_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
         # define the parameters
         [R0,Z0,r,kappa,delta] = shape
-        [dR0dr,dZ0dr,s_kappa,s_delta] = params
+        [dR0dr,dZ0dr,s_kappa,s_delta] = shape_deriv
         with np.errstate(invalid='ignore'):
             x = np.arcsin(delta)
         theta_R = theta + x * np.sin(theta)
 
-        if method == 'analytical':
+        # compute the derivatives for the jacobian
+        dRdtheta = - r * np.sin(theta_R)(1 + x * np.cos(theta))
+        dZdtheta = kappa * r * np.cos(theta)
+        dRdr = dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)
+        dZdr = kappa * (s_kappa + 1) * np.sin(theta)
+
+        # compute Mercier-Luc arclength derivative and |grad r|
+        J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
+
+        if return_deriv:
+            return dRdtheta, dZdtheta, dRdr, dZdr, J_r
+        else:
+            return J_r
+
+    def miller_bp(self,shape,shape_deriv,theta,R,dPsi_dr,method='simplified'):
+        # define the parameters
+        [R0,Z0,r,kappa,delta] = shape
+        [dR0dr,dZ0dr,s_kappa,s_delta] = shape_deriv
+        with np.errstate(invalid='ignore'):
+            x = np.arcsin(delta)
+        theta_R = theta + x * np.sin(theta)
+
+        if method == 'simplified':
             Bp_nom = np.sqrt(np.sin(theta_R)**2 + (1 + x * np.cos(theta))**2 + kappa**2 * np.cos(theta)**2)
             Bp_denom = np.cos(x * np.sin(theta)) + dR0dr * np.cos(theta) + (s_kappa - s_delta * np.cos(theta) + (1+ s_kappa) * x * np.cos(theta)) * np.sin(theta) * np.sin(theta_R)
 
-            Bp_param = (dPsi_dr / (R * kappa)) * Bp_nom / Bp_denom
+            grad_r_norm = (1 / kappa) * Bp_nom / Bp_denom
         
-        elif method == 'numerical':
-            # compute the derivatives for the jacobian
-            dRdtheta = - r * np.sin(theta_R)(1 + x * np.cos(theta))
-            dZdtheta = kappa * r * np.cos(theta)
-            dRdr = dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)
-            dZdr = kappa * (s_kappa + 1) * np.sin(theta)
-
-            # compute the jacobian and the Mercier-Luc arclength derivative
-            J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
+        elif method == 'algebraic':
+            dRdtheta, dZdtheta, dRdr, dZdr, J_r = self.miller_jr(shape,shape_deriv,theta,R,return_deriv=True)
+            # compute Mercier-Luc arclength derivative and |grad r|
             dl_dtheta = np.sqrt(dRdtheta**2 + dZdtheta**2)
-
-            # compute |grad r|
             grad_r_norm = (R/J_r)*dl_dtheta
 
-            # Poloidal magnetic flux density
-            Bp_param = (dPsi_dr/R) * grad_r_norm
+            
+        # Poloidal magnetic flux density
+        Bp_param = (dPsi_dr/R) * grad_r_norm
 
         return Bp_param
 
-    def turnbull(self,params,theta,norm=False):
+    def turnbull(self,shape,theta,norm=False):
         # flux surface coordinate parameterisation from [Turnbull PoP 6 (1999)]
-        [R0,Z0,r,kappa,delta,zeta] = params
+        [R0,Z0,r,kappa,delta,zeta] = shape
         with np.errstate(invalid='ignore'):
             x = np.arcsin(delta)
         theta_R = theta + x * np.sin(theta)
@@ -354,10 +369,10 @@ class LocalEquilibrium():
         
         return R_param, Z_param, theta_ref
 
-    def turnbull_bp(self,params,shape,theta,R,dPsi_dr,method='analytical'):
+    def turnbull_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
         # define the parameters
         [R0,Z0,r,kappa,delta,zeta] = shape
-        [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta] = params
+        [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta] = shape_deriv
         with np.errstate(invalid='ignore'):
             x = np.arcsin(delta)
         theta_R = theta + x * np.sin(theta)
@@ -365,24 +380,42 @@ class LocalEquilibrium():
         theta_Z = theta + zeta * np.sin(2 * theta)
         dtheta_Zdtheta = 1 + 2 * zeta * np.cos(2 * theta)
 
-        if method == 'analytical':
+        # compute the derivatives for the jacobian
+        dRdtheta = - r * np.sin(theta_R) * dtheta_Rdtheta
+        dZdtheta = kappa * r * np.cos(theta_Z) * dtheta_Zdtheta
+        dRdr = dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)
+        dZdr = dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z))
+
+        # compute Mercier-Luc arclength derivative and |grad r|
+        J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
+
+        if return_deriv:
+            return dRdtheta, dZdtheta, dRdr, dZdr, J_r
+        else:
+            return J_r
+
+    def turnbull_bp(self,shape,shape_deriv,theta,R,dPsi_dr,method='simplified'):
+        # define the parameters
+        [R0,Z0,r,kappa,delta,zeta] = shape
+        [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta] = shape_deriv
+        with np.errstate(invalid='ignore'):
+            x = np.arcsin(delta)
+        theta_R = theta + x * np.sin(theta)
+        dtheta_Rdtheta = 1 + x * np.cos(theta)
+        theta_Z = theta + zeta * np.sin(2 * theta)
+        dtheta_Zdtheta = 1 + 2 * zeta * np.cos(2 * theta)
+
+        if method == 'simplified':
             Bp_nom = np.sqrt(np.sin(theta_R)**2 * dtheta_Rdtheta**2 + kappa**2 * np.cos(theta_Z)**2 * dtheta_Zdtheta**2)
             Bp_denom = kappa * np.cos(theta_Z) * dtheta_Zdtheta * (dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)) + np.sin(theta_R) * dtheta_Rdtheta * (dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z)))
 
             Bp_param = (dPsi_dr / R) * Bp_nom / Bp_denom
         
-        elif method == 'numerical':
-            # compute the derivatives for the jacobian
-            dRdtheta = - r * np.sin(theta_R) * dtheta_Rdtheta
-            dZdtheta = kappa * r * np.cos(theta_Z) * (1 + 2 * zeta * np.cos(2 * theta))
-            dRdr = dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)
-            dZdr = dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z))
+        elif method == 'algebraic':
+            dRdtheta, dZdtheta, dRdr, dZdr, J_r = self.turnbull_jr(shape,shape_deriv,theta,R,return_deriv=True)
 
-            # compute the jacobian and the Mercier-Luc arclength derivative
-            J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
+            # compute the Mercier-Luc arclength derivative and |grad r|
             dl_dtheta = np.sqrt(dRdtheta**2 + dZdtheta**2)
-
-            # compute |grad r|
             grad_r_norm = (R/J_r)*dl_dtheta
 
             # Poloidal magnetic flux density
@@ -390,9 +423,9 @@ class LocalEquilibrium():
 
         return Bp_param
 
-    def turnbull_tilt(self,params,theta,norm=False):
+    def turnbull_tilt(self,shape,theta,norm=False):
         # flux surface coordinate parameterisation from [Turnbull PoP 6 (1999)]
-        [R0,Z0,r,kappa,delta,zeta,tilt] = params
+        [R0,Z0,r,kappa,delta,zeta,tilt] = shape
         with np.errstate(invalid='ignore'):
             x = np.arcsin(delta)
         theta_R = theta + x * np.sin(theta) + tilt
@@ -409,10 +442,35 @@ class LocalEquilibrium():
 
         return R_param, Z_param, theta_ref
 
-    def turnbull_tilt_bp(self,params,shape,theta,R,dPsi_dr,method='numerical'):
+    def turnbull_tilt_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
         # define the parameters
         [R0,Z0,r,kappa,delta,zeta,tilt] = shape
-        [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta,s_tilt] = params
+        [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta,s_tilt] = shape_deriv
+        with np.errstate(invalid='ignore'):
+            x = np.arcsin(delta)
+        theta_R = theta + x * np.sin(theta) + tilt
+        dtheta_Rdtheta = 1 + x * np.cos(theta)
+        theta_Z = theta + zeta * np.sin(2 * theta)
+        dtheta_Zdtheta = 1 + 2 * zeta * np.cos(2 * theta)
+        
+        # compute the derivatives for the jacobian
+        dRdtheta = - r * np.sin(theta_R) * dtheta_Rdtheta
+        dZdtheta = kappa * r * np.cos(theta_Z) * dtheta_Zdtheta
+        dRdr = dR0dr + np.cos(theta_R) - (s_delta * np.sin(theta) + s_tilt) * np.sin(theta_R)
+        dZdr = dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z))
+        
+        # compute Mercier-Luc arclength derivative and |grad r|
+        J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
+
+        if return_deriv:
+            return dRdtheta, dZdtheta, dRdr, dZdr, J_r
+        else:
+            return J_r
+
+    def turnbull_tilt_bp(self,shape,shape_deriv,theta,R,dPsi_dr,method='algebraic'):
+        # define the parameters
+        [R0,Z0,r,kappa,delta,zeta,tilt] = shape
+        [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta,s_tilt] = shape_deriv
         with np.errstate(invalid='ignore'):
             x = np.arcsin(delta)
         theta_R = theta + x * np.sin(theta) + tilt
@@ -420,28 +478,21 @@ class LocalEquilibrium():
         theta_Z = theta + zeta * np.sin(2 * theta)
         dtheta_Zdtheta = 1 + 2 * zeta * np.cos(2 * theta)
 
-        if method == 'analytical':
+        if method == 'simplified':
             Bp_nom = np.sqrt(np.sin(theta_R)**2 * dtheta_Rdtheta**2 + kappa**2 * np.cos(theta_Z)**2 * dtheta_Zdtheta**2)
             Bp_denom = kappa * np.cos(theta_Z) * dtheta_Zdtheta * (dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R) + s_tilt) + np.sin(theta_R) * dtheta_Rdtheta * (dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z)))
 
-            Bp_param = (dPsi_dr / R) * Bp_nom / Bp_denom
+            grad_r_norm = Bp_nom / Bp_denom
         
-        elif method == 'numerical':
-            # compute the derivatives for the jacobian
-            dRdtheta = - r * np.sin(theta_R) * dtheta_Rdtheta
-            dZdtheta = kappa * r * np.cos(theta_Z) * (1 + 2 * zeta * np.cos(2 * theta))
-            dRdr = dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R) + s_tilt
-            dZdr = dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z))
+        elif method == 'algebraic':
+            dRdtheta, dZdtheta, dRdr, dZdr, J_r = self.turnbull_tilt_jr(shape,shape_deriv,theta,R,return_deriv=True)
 
-            # compute the jacobian and the Mercier-Luc arclength derivative
-            J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
+            # compute the Mercier-Luc arclength derivative and |grad r|
             dl_dtheta = np.sqrt(dRdtheta**2 + dZdtheta**2)
-
-            # compute |grad r|
             grad_r_norm = (R/J_r)*dl_dtheta
 
-            # Poloidal magnetic flux density
-            Bp_param = (dPsi_dr/R) * grad_r_norm
+        # Poloidal magnetic flux density
+        Bp_param = (dPsi_dr/R) * grad_r_norm
 
         return Bp_param
 
@@ -471,14 +522,14 @@ class LocalEquilibrium():
 
         return R_param, Z_param, theta_ref
 
-    def mxh(self,params,theta,norm=None):
+    def mxh(self,shape,theta,norm=None):
         # flux surface coordinate parameterisation from [Arbon PPCF 61 (2021)]
-        [R0,Z0,r,kappa,c_0] = params[:5]
+        [R0,Z0,r,kappa,c_0] = shape[:5]
         theta_R = theta + c_0
-        N = int((len(params)-5)/2)
+        N = int((len(shape)-5)/2)
         for n in range(1,N+1):
-            c_n = params[5 + (n-1)*2]
-            s_n = params[6 + (n-1)*2]
+            c_n = shape[5 + (n-1)*2]
+            s_n = shape[6 + (n-1)*2]
             theta_R +=  c_n * np.cos(n * theta) + s_n * np.sin(n * theta)
 
         R_param = R0 + r * np.cos(theta_R)
@@ -492,13 +543,15 @@ class LocalEquilibrium():
 
         return R_param, Z_param, theta_ref
 
+    # cost functions
     def cost_param(self,params):
         # compute the flux surface parameterisation for a given shape set `params`
         self.R_param, self.Z_param, self.theta_ref = self.param(params, np.append(self.theta,self.theta[0]), norm=True)
 
         # interpolate the actual flux surface contour to the theta basis 
-        self.R_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[0]
-        self.Z_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[1]
+        with np.errstate(divide='ignore'):
+            self.R_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[0]
+            self.Z_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[1]
 
         # define the cost function
         L1_norm = np.abs(np.array([self.R_param,self.Z_param])-np.array([self.R_ref,self.Z_ref])).flatten()
@@ -519,7 +572,7 @@ class LocalEquilibrium():
         return cost
     
     def cost_bpol(self,params):
-        self.Bp_param_opt = self.bpol_param(params, self.shape, self.theta, self.R_param[:-1], self.dpsidr)
+        self.Bp_param_opt = self.bpol_param(self.shape, params, self.theta, self.R_param[:-1], self.dpsidr)
         
         theta_RZ = self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1]
         Bp_RZ = self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1]
@@ -559,6 +612,7 @@ class LocalEquilibrium():
 
         return cost#*(filter/self.Bp_ref)#*weights
 
+    # analytic geometry extraction
     def extract_analytic_geo(fluxsurface):
         """Extract Turnbull-Miller geometry parameters [Turnbull PoP 6 1113 (1999)] from a flux surface contour. Adapted from 'extract_miller_from_eqdsk.py' by D. Told.
 
@@ -606,6 +660,7 @@ class LocalEquilibrium():
 
         return miller_geo
     
+    # auxiliary functions
     def printer(self,printer,shape,labels,shape_bpol,labels_bpol,lref='a'):
         print('Printing input values for {} code...'.format(printer))
         i_x_loc = self.x_grid.index(self.x_loc)
