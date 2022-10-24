@@ -24,6 +24,7 @@ class LocalEquilibrium():
     def __init__(self,method,equilibrium,x_loc,x_label='rho_tor',lref='a',cost_f='l1l2',n_x=10,n_theta=7200,n_harmonics=1,incl_analytic_geo=False,opt_bpol=False,diag_lsq=0,verbose=True):
         self._methods = {'miller':{
                              'param':self.miller,
+                             'param_jr':self.miller_jr,
                              'param_initial':[0.,0.,0.,1.,0.],
                              'param_bounds':([0.,-np.inf,0.,0.,-np.inf],np.inf),
                              'param_labels':['R0','Z0','r','kappa','delta'],
@@ -34,8 +35,9 @@ class LocalEquilibrium():
                          },
                          'turnbull':{
                              'param':self.turnbull,
+                             'param_jr':self.turnbull_jr,
                              'param_initial':[0.,0.,0.,1.,0.,0.],
-                             'param_bounds':([0.,-np.inf,0.,0.,-np.inf,-np.inf],np.inf),
+                             'param_bounds':([0.,-np.inf,0.,0.,-1,-0.5],[np.inf,np.inf,np.inf,np.inf,1,0.5]),
                              'param_labels':['R0','Z0','r','kappa','delta','zeta'],
                              'bpol_param':self.turnbull_bp,
                              'bpol_initial':[0.,0.,0.,0.,0.],
@@ -44,6 +46,7 @@ class LocalEquilibrium():
                          },
                          'turnbull_tilt':{
                              'param':self.turnbull_tilt,
+                             'param_jr':self.turnbull_tilt_jr,
                              'param_initial':[0.,0.,0.,1.,0.,0.,0.],
                              'param_bounds':([0.,-np.inf,0.,0.,-np.inf,-np.inf,-np.inf],np.inf),
                              'param_labels':['R0','Z0','r','kappa','delta','zeta','tilt'],
@@ -54,6 +57,7 @@ class LocalEquilibrium():
                          },
                          'miller_general':{
                              'param':self.miller_general,
+                             'param_jr':self.miller_jr,
                              'param_initial':list(np.zeros(2+4*n_harmonics)),
                              'param_bounds':[-5,5],
                              'param_labels':['aR_0','aZ_0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
@@ -64,10 +68,22 @@ class LocalEquilibrium():
                          },
                          'mxh':{
                              'param':self.mxh,
-                             'param_initial':list(np.zeros(5+2*n_harmonics)),
-                             'param_bounds':[-np.inf,np.inf],
+                             'param_jr':self.mxh_jr,
+                             'param_initial':[0.,0.,0.,1.,0.]+list(np.zeros(2*n_harmonics)),
+                             'param_bounds':[[0.,-np.inf,0.,0.,-2*np.pi]+list(-np.inf*np.ones(2*n_harmonics)),[np.inf,np.inf,np.inf,np.inf,2*np.pi]+list(np.inf*np.ones(2*n_harmonics))],
                              'param_labels':['R0','Z0','r','kappa','c_0']+[label for sublist in [['c_{}'.format(n),'s_{}'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
-                             'bpol_param':self.miller_bp,
+                             'bpol_param':self.mxh_bp,
+                             'bpol_initial':list(np.ones(4+2*n_harmonics)),
+                             'bpol_bounds':[-np.inf,np.inf],
+                             'bpol_labels':['dR0dr','dZ0dr','s_kappa','dc_0dr']+[label for sublist in [['dc_{}dr'.format(n),'ds_{}dr'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
+                         },
+                         'mxxh':{
+                             'param':self.mxxh,
+                             'param_jr':self.mxxh_jr,
+                             'param_initial':[0.,0.,0.,1.,0.]+list(np.zeros(2*n_harmonics)),
+                             'param_bounds':[[0.,-np.inf,0.,0.,-2*np.pi]+list(-np.inf*np.ones(2*n_harmonics)),[np.inf,np.inf,np.inf,np.inf,2*np.pi]+list(np.inf*np.ones(2*n_harmonics))],
+                             'param_labels':['R0','Z0','r','kappa','c_0']+[label for sublist in [['c_{}'.format(n),'s_{}'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
+                             'bpol_param':self.mxxh_bp,
                              'bpol_initial':list(np.ones(4+2*n_harmonics)),
                              'bpol_bounds':[-np.inf,np.inf],
                              'bpol_labels':['dR0dr','dZ0dr','s_kappa','dc_0dr']+[label for sublist in [['dc_{}dr'.format(n),'ds_{}dr'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
@@ -86,6 +102,7 @@ class LocalEquilibrium():
         # initialise the LocalEquilibrium object methods consistent with the method input
         self.method = method
         self.param = self._methods[self.method]['param']
+        self.param_jr = self._methods[self.method]['param_jr']
         self.param_initial = self._methods[self.method]['param_initial']
         self.param_bounds = self._methods[self.method]['param_bounds']
         self.param_labels = self._methods[self.method]['param_labels']
@@ -123,80 +140,81 @@ class LocalEquilibrium():
         opt_timing = 0.
         print('Optimising parametrisation fit of fluxsurfaces...')
         for i_x_loc,xfs in enumerate(self.x_grid):
-            if self.verbose:
-                # print a progress %
-                stdout.write('\r {}% completed'.format(round(100*(find(xfs,self.x_grid)+1)/len(self.x_grid))))
-                stdout.flush()
-            # per flux surface extract a dict with all the values from the equilibrium
-            self.fs = {}
-            for key in set(['R','Z','R0','Z0','theta_RZ','r','psi']+self.param_labels):
-                if key in self.eq.fluxsurfaces:
-                    quantity = copy.deepcopy(self.eq.fluxsurfaces[key][i_x_loc])
-                    if isinstance(quantity,list):
-                        self.fs.update({key:np.array(quantity)})
-                    else:
-                        self.fs.update({key:quantity})
+            with np.errstate(divide='ignore'):
+                if self.verbose:
+                    # print a progress %
+                    stdout.write('\r {}% completed'.format(round(100*(find(xfs,self.x_grid)+1)/len(self.x_grid))))
+                    stdout.flush()
+                # per flux surface extract a dict with all the values from the equilibrium
+                self.fs = {}
+                for key in set(['R','Z','R0','Z0','theta_RZ','r','psi']+self.param_labels):
+                    if key in self.eq.fluxsurfaces:
+                        quantity = copy.deepcopy(self.eq.fluxsurfaces[key][i_x_loc])
+                        if isinstance(quantity,list):
+                            self.fs.update({key:np.array(quantity)})
+                        else:
+                            self.fs.update({key:quantity})
 
-            if 'miller_geo' in self.eq.fluxsurfaces:
-                self.fs['miller_geo'] = {}
-                for key in self.eq.fluxsurfaces['miller_geo']:
-                    quantity = copy.deepcopy(self.eq.fluxsurfaces['miller_geo'][key][i_x_loc])
-                    if isinstance(quantity,list):
-                        self.fs['miller_geo'].update({key:np.array(quantity)})
-                    else:
-                        self.fs['miller_geo'].update({key:quantity})
+                if 'miller_geo' in self.eq.fluxsurfaces:
+                    self.fs['miller_geo'] = {}
+                    for key in self.eq.fluxsurfaces['miller_geo']:
+                        quantity = copy.deepcopy(self.eq.fluxsurfaces['miller_geo'][key][i_x_loc])
+                        if isinstance(quantity,list):
+                            self.fs['miller_geo'].update({key:np.array(quantity)})
+                        else:
+                            self.fs['miller_geo'].update({key:quantity})
 
-            #self.fs['theta_RZ'] = arctan2pi(self.fs['Z']-self.fs['Z0'],self.fs['R']-self.fs['R0'])
-            #self.theta = np.linspace(np.min(self.fs['theta_RZ']),np.max(self.fs['theta_RZ']),self.n_theta)
-            
-            # check if there are values for the shape parameters that can be used as initial condition
-            for i_key,key in enumerate(self.param_labels):
-                if key in self.fs['miller_geo']:
-                    self.param_initial[i_key] = copy.deepcopy(self.fs['miller_geo'][key])
-                elif key in self.fs:
-                    self.param_initial[i_key] = copy.deepcopy(self.fs[key])
+                #self.fs['theta_RZ'] = arctan2pi(self.fs['Z']-self.fs['Z0'],self.fs['R']-self.fs['R0'])
+                #self.theta = np.linspace(np.min(self.fs['theta_RZ']),np.max(self.fs['theta_RZ']),self.n_theta)
+                
+                # check if there are values for the shape parameters that can be used as initial condition
+                for i_key,key in enumerate(self.param_labels):
+                    if key in self.fs['miller_geo']:
+                        self.param_initial[i_key] = copy.deepcopy(self.fs['miller_geo'][key])
+                    elif key in self.fs:
+                        self.param_initial[i_key] = copy.deepcopy(self.fs[key])
 
-            self.R_geo, self.Z_geo, self.theta_ref_geo = self.param(self.param_initial, np.append(self.theta,self.theta[0]), norm=False)
-            self.R_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
-            self.Z_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
+                self.R_geo, self.Z_geo, self.theta_ref_geo = self.param(self.param_initial, np.append(self.theta,self.theta[0]), norm=False)
+                self.R_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
+                self.Z_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
 
-            '''plt.figure()
-            plt.plot(self.R_ref_geo,self.Z_ref_geo)
-            plt.axis('scaled')'''
+                '''plt.figure()
+                plt.plot(self.R_ref_geo,self.Z_ref_geo)
+                plt.axis('scaled')'''
 
-            time0 = time.time()
-            # compute the optimised shape parameters
-            self.params = least_squares(self.cost_param, 
-                                        self.param_initial, 
-                                        bounds=self.param_bounds, 
-                                        ftol=self.tolerance, 
-                                        xtol=self.tolerance, 
-                                        gtol=self.tolerance, 
-                                        loss='soft_l1', 
-                                        verbose=diag_lsq)['x']
-            opt_timing += time.time()-time0
+                time0 = time.time()
+                # compute the optimised shape parameters
+                self.params = least_squares(self.cost_param, 
+                                            self.param_initial, 
+                                            bounds=self.param_bounds, 
+                                            ftol=self.tolerance, 
+                                            xtol=self.tolerance, 
+                                            gtol=self.tolerance, 
+                                            loss='soft_l1', 
+                                            verbose=diag_lsq)['x']
+                opt_timing += time.time()-time0
 
-            # add the final parameterised and interpolated 
-            params_keys = ['theta', 'R_param', 'Z_param', 'theta_ref', 'R_ref', 'Z_ref','R_ref_geo', 'Z_ref_geo']
-            params_values = [self.theta, self.R_param+self.params[0], self.Z_param+self.params[1], self.theta_ref, self.R_ref+self.params[0], self.Z_ref+self.params[1], self.R_ref_geo, self.Z_ref_geo]
-            
-            for i_key,key in enumerate(params_keys):
-                self.fs.update({key:copy.deepcopy(params_values[i_key])})
+                # add the final parameterised and interpolated 
+                params_keys = ['theta', 'R_param', 'Z_param', 'theta_ref', 'R_ref', 'Z_ref','R_ref_geo', 'Z_ref_geo']
+                params_values = [self.theta, self.R_param+self.params[0], self.Z_param+self.params[1], self.theta_ref, self.R_ref+self.params[0], self.Z_ref+self.params[1], self.R_ref_geo, self.Z_ref_geo]
+                
+                for i_key,key in enumerate(params_keys):
+                    self.fs.update({key:copy.deepcopy(params_values[i_key])})
 
-            # if the current flux surface is the one at self.x_loc, set the shape parameters
-            if xfs == self.x_loc:
-                self.shape = copy.deepcopy(self.params)
+                # if the current flux surface is the one at self.x_loc, set the shape parameters
+                if xfs == self.x_loc:
+                    self.shape = copy.deepcopy(self.params)
 
-            # label and add the optimised shape parameters to the flux surface dict
-            for i_key, key in enumerate(self.param_labels):
-                self.fs.update({key:self.params[i_key]})
-            
-            del self.fs['R']
-            del self.fs['Z']
-            del self.fs['theta_RZ']
-            del self.fs['miller_geo']
+                # label and add the optimised shape parameters to the flux surface dict
+                for i_key, key in enumerate(self.param_labels):
+                    self.fs.update({key:self.params[i_key]})
+                
+                del self.fs['R']
+                del self.fs['Z']
+                del self.fs['theta_RZ']
+                del self.fs['miller_geo']
 
-            merge_trees(self.fs,self.eq.fluxsurfaces['fit_geo'])
+                merge_trees(self.fs,self.eq.fluxsurfaces['fit_geo'])
         if self.verbose:
             stdout.write('\n')
         list_to_array(self.eq.fluxsurfaces['fit_geo'])
@@ -223,20 +241,26 @@ class LocalEquilibrium():
             s_deriv.update({'s_kappa':self.eq.fluxsurfaces['fit_geo']['r']*self.dxdr*np.gradient(np.log(self.eq.fluxsurfaces['fit_geo']['kappa']),np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)})
         if 'delta' in self.param_labels:
             s_deriv.update({'s_delta':(self.eq.fluxsurfaces['fit_geo']['r']/np.sqrt(1-self.eq.fluxsurfaces['fit_geo']['delta']**2))*self.dxdr*np.gradient(self.eq.fluxsurfaces['fit_geo']['delta'],np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)})
-        if 'zeta' in self.param_labels:
-            s_deriv.update({'s_zeta':self.eq.fluxsurfaces['fit_geo']['r']*self.dxdr*np.gradient(self.eq.fluxsurfaces['fit_geo']['zeta'],np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)}) 
-        if 'tilt' in self.param_labels:
-            s_deriv.update({'s_tilt':self.eq.fluxsurfaces['fit_geo']['r']*self.dxdr*np.gradient(self.eq.fluxsurfaces['fit_geo']['tilt'],np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)}) 
-
+        
         for i_key,key in enumerate(self.bpol_labels):
+            key_param = None
             if key in s_deriv.keys():
                 self.eq.fluxsurfaces['fit_geo'][key] = s_deriv[key]
             else:
-                self.eq.fluxsurfaces['fit_geo'][key] = self.dxdr*np.gradient(np.array(self.eq.fluxsurfaces['fit_geo'][self.param_labels[i_key]]),np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)
+                if 'dr' in key:
+                    key_param = (key.split('dr')[0]).split('d')[1]
+                elif 's_' in key:
+                    key_param = key.split('s_')[1]
+                if key_param not in ['R0','Z0']:
+                    print(key_param)
+                    self.eq.fluxsurfaces['fit_geo'][key] = self.eq.fluxsurfaces['fit_geo']['r']*self.dxdr*np.gradient(self.eq.fluxsurfaces['fit_geo'][key_param],np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)
+                else:
+                    self.eq.fluxsurfaces['fit_geo'][key] = self.dxdr*np.gradient(np.array(self.eq.fluxsurfaces['fit_geo'][key_param]),np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)
 
             self.shape_bpol.append(self.eq.fluxsurfaces['fit_geo'][key][self.x_grid.index(self.x_loc)])
 
-        if self.method in ['miller','turnbull','turnbull_tilt']:
+        if self.method in ['miller','turnbull','turnbull_tilt','mxh','mxxh']:
+            self.dRdtheta_param, self.dZdtheta_param, self.dRdr_param, self.dZdr_param, self.J_r_param = self.param_jr(self.shape,self.shape_bpol,self.theta,self.R_param[:-1],return_deriv=True)
             self.Bp_param = self.bpol_param(self.shape, self.shape_bpol, self.theta, self.R_param[:-1], self.dpsidr)
             self.Bp_ref = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref[:-1]))
             self.shape_bpol_ref = copy.deepcopy(self.shape_bpol)
@@ -530,7 +554,7 @@ class LocalEquilibrium():
         for n in range(1,N+1):
             c_n = shape[5 + (n-1)*2]
             s_n = shape[6 + (n-1)*2]
-            theta_R +=  c_n * np.cos(n * theta) + s_n * np.sin(n * theta)
+            theta_R += c_n * np.cos(n * theta) + s_n * np.sin(n * theta)
 
         R_param = R0 + r * np.cos(theta_R)
         Z_param = Z0 + kappa * r * np.sin(theta)
@@ -542,6 +566,51 @@ class LocalEquilibrium():
             Z_param-=Z0
 
         return R_param, Z_param, theta_ref
+     
+    def mxh_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        [R0,Z0,r,kappa,c_0] = shape[:5]
+        theta_R = theta + c_0
+        dtheta_Rdtheta = np.ones_like(theta)
+        N = int((len(shape)-5)/2)
+        for n in range(1,N+1):
+            c_n = shape[5 + (n-1)*2]
+            s_n = shape[6 + (n-1)*2]
+            theta_R +=  c_n * np.cos(n * theta) + s_n * np.sin(n * theta)
+            dtheta_Rdtheta += (-n * c_n * np.sin(n * theta)) + (n * s_n * np.cos(n * theta))
+        
+        # compute the derivatives for the jacobian
+        [dR0dr,dZ0dr,s_kappa,dc_0dr] = shape_deriv[:4]
+        dtheta_Rdr = dc_0dr * np.ones_like(theta)
+        M = int((len(shape)-4)/2)
+        for m in range(1,M+1):
+            dc_mdr = shape_deriv[4 + (m-1)*2]
+            ds_mdr = shape_deriv[5 + (m-1)*2]
+            dtheta_Rdr += dc_mdr * np.cos(m * theta) + ds_mdr * np.sin(m * theta)
+
+        dRdtheta = - r * np.sin(theta_R) * dtheta_Rdtheta
+        dZdtheta = kappa * r * np.cos(theta)
+        dRdr = dR0dr + np.cos(theta_R) - np.sin(theta_R) * dtheta_Rdr
+        dZdr = dZ0dr + kappa * (s_kappa + 1) * np.sin(theta)
+
+        # compute Mercier-Luc arclength derivative and |grad r|
+        J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
+
+        if return_deriv:
+            return dRdtheta, dZdtheta, dRdr, dZdr, J_r
+        else:
+            return J_r
+
+    def mxh_bp(self,shape,shape_deriv,theta,R,dPsi_dr):
+        dRdtheta, dZdtheta, dRdr, dZdr, J_r = self.mxh_jr(shape,shape_deriv,theta,R,return_deriv=True)
+
+        # compute the Mercier-Luc arclength derivative and |grad r|
+        dl_dtheta = np.sqrt(dRdtheta**2 + dZdtheta**2)
+        grad_r_norm = (R/J_r)*dl_dtheta
+
+        # Poloidal magnetic flux density
+        Bp_param = (dPsi_dr / R) * grad_r_norm
+
+        return Bp_param
 
     # cost functions
     def cost_param(self,params):
@@ -549,16 +618,22 @@ class LocalEquilibrium():
         self.R_param, self.Z_param, self.theta_ref = self.param(params, np.append(self.theta,self.theta[0]), norm=True)
 
         # interpolate the actual flux surface contour to the theta basis 
-        with np.errstate(divide='ignore'):
-            self.R_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[0]
-            self.Z_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[1]
+        self.R_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[0]
+        dR_refdtheta = np.gradient(self.R_ref+params[0],self.theta_ref,edge_order=2)
+        weight_R = (dR_refdtheta/np.max(dR_refdtheta))
+        self.Z_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[1]
+        dZ_refdtheta = np.gradient(self.Z_ref+params[1],self.theta_ref,edge_order=2)
+        weight_Z = (dZ_refdtheta/np.max(dZ_refdtheta))
 
         # define the cost function
         L1_norm = np.abs(np.array([self.R_param,self.Z_param])-np.array([self.R_ref,self.Z_ref])).flatten()
         L2_norm = np.sqrt((self.R_param-self.R_ref)**2+(self.Z_param-self.Z_ref)**2)
 
         if self.cost_param_f == 'l1l2':
-            cost = self.n_theta*np.hstack((L2_norm,L1_norm))
+            cost = self.n_theta*np.hstack((L1_norm,L2_norm))
+        elif self.cost_param_f == 'l1l2_w':
+            alpha = 0.05+weight_R
+            cost = np.hstack(((alpha),(alpha),(alpha)))*np.hstack((L1_norm,L2_norm))
         else:
             self.Bt_param = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.fs['psi'])/(self.R_param+params[0])
             self.Bt_ref  = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.fs['psi'])/(self.R_ref+params[0])
