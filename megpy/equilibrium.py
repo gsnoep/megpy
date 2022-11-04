@@ -311,7 +311,7 @@ class Equilibrium():
         # check refine requirements
         if refine:
             self.refine = refine
-            self.refine_equilibrium(nw=refine*raw['nw'],nh=refine*raw['nh'])
+            self.refine_equilibrium(nw=int(refine*raw['nw']),nh=int(refine*raw['nh']))
         else:
             derived.update(self.raw)
 
@@ -655,14 +655,14 @@ class Equilibrium():
         
         old_w = np.linspace(0,1,self.raw['nw'])
         old_h = np.linspace(0,1,self.raw['nh'])
-        if nw and nw > self.raw['nw']:
+        if nw:
             new_w = np.linspace(0,1,nw)
             refine_w = True
         else:
             new_w = old_w
             refine_w = False
             #raise ValueError('Provided nw does not refine the equilibrium, provided:{} < exisiting:{}'.format(nw,self.derived['nw']))
-        if nh and nh > self.raw['nh']:
+        if nh:
             new_h = np.linspace(0,1,nh)
             refine_h = True
         else:
