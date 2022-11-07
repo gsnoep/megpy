@@ -103,6 +103,34 @@ def arcsin2pi(x,bounds_error=False):
 
     return theta
 
+def arccos2pi(x,bounds_error=False):
+    """Compute the element-wise arccos(x) reformating the result to be bound between 0 and 2 * pi
+
+    Args:
+        x (array): x-coordinates, MUST be real-values between -1 and 1!
+
+    Raises:
+        ValueError: if x-coordinates are not -1 <= x <= 1
+
+    Returns:
+        thetha (array): element-wise arcsin(x) bounded between 0 and 2 * pi
+    """
+    if (np.any(x<-1) or np.any(x>1)):
+        if bounds_error:
+            raise ValueError('arcsin2pi: x does not fit the input bounds requirement: -1 <= x <= 1 !')
+        else:
+            x[x>1] = 1.
+            x[x<-1] = -1.
+
+    # calculate the angle
+    theta = np.arccos(x)
+
+    # fix the asymptote jumps
+    theta[:find(1,x)] = (-np.arccos(x)+2*np.pi)[:find(1,x)]
+    theta[find(-1,x):] = (-np.arccos(x)+2*np.pi)[find(-1,x):]
+
+    return theta
+
 def read_file(path='./',file=None,mode='r'):
     """Read the contents of a file to a list of lines, with automatic path validity checks.
 
