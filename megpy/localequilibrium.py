@@ -86,7 +86,6 @@ class LocalEquilibrium():
 
         # copy the equilibrium
         self.eq = copy.deepcopy(equilibrium)
-        self.eq.fluxsurfaces['fit_geo'] = {}
 
         # initialise the LocalEquilibrium object methods consistent with the method input
         self._param = param
@@ -131,6 +130,9 @@ class LocalEquilibrium():
             if np.max(theta) < theta_max:
                 theta_max = np.max(theta)
         self.theta = np.linspace(theta_min,theta_max,self.n_theta)
+
+        # add equilibrium sub-tree for fit data
+        self.eq.fluxsurfaces['fit_geo'] = {}
 
         # optimize the shape parameters
         opt_timing = 0.
