@@ -69,9 +69,9 @@ class LocalEquilibrium():
                          'mxh':{
                              'param':self.mxh,
                              'param_jr':self.mxh_jr,
-                             'param_initial':[0.,0.,0.,1.,0.]+list(np.zeros(2*n_harmonics)),
-                             'param_bounds':[[0.,-np.inf,0.,0.,-2*np.pi]+list(-np.inf*np.ones(2*n_harmonics)),[np.inf,np.inf,np.inf,np.inf,2*np.pi]+list(np.inf*np.ones(2*n_harmonics))],
-                             'param_labels':['R0','Z0','r','kappa','c_0']+[label for sublist in [['c_{}'.format(n),'s_{}'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
+                             'param_initial':[0.]+list(np.zeros(2*n_harmonics)),
+                             'param_bounds':[[-2*np.pi]+list(-np.inf*np.ones(2*n_harmonics)),[2*np.pi]+list(np.inf*np.ones(2*n_harmonics))],
+                             'param_labels':['c_0']+[label for sublist in [['c_{}'.format(n),'s_{}'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
                              'param_bpol':self.mxh_bp,
                              'deriv_initial':list(np.ones(4+2*n_harmonics)),
                              'deriv_bounds':[-np.inf,np.inf],
@@ -86,6 +86,7 @@ class LocalEquilibrium():
 
         # copy the equilibrium
         self.eq = copy.deepcopy(equilibrium)
+        self.eq.fluxsurfaces['fit_geo'] = {}
 
         # initialise the LocalEquilibrium object methods consistent with the method input
         self._param = param
@@ -103,10 +104,16 @@ class LocalEquilibrium():
         self.n_theta = n_theta
         # use case 1: standalone CLI call
         if self.n_x > 1:
-            # setup the radial grid
-            _x_list = list(np.linspace(self.x_loc-self.x_loc*0.005,self.x_loc,int(self.n_x/2)))
-            x_list_ = list(np.linspace(self.x_loc,self.x_loc+self.x_loc*0.005,int(self.n_x/2)))
-            self.x_grid = [x for x in (_x_list[:-1]+x_list_) if 0. <= x <= 1.]
+            # if n_X is not odd, make it odd
+            if not self.n_x & 0x1:
+                self.n_x = self.n_x-1
+                if verbose:
+                    print('Provided n_x is not odd, setting x-grid size to {}'.format(self.n_x))
+            # set the fraction of x_loc used set the min/max of the x_grid
+            loc_frac = 0.005
+            # generate the radial grid
+            x_list = [(self.x_loc-loc_frac*self.x_loc)+i*(loc_frac*self.x_loc/int((self.n_x-1)/2)) for i in range(0,self.n_x)]
+            self.x_grid = [x for x in x_list if 0. <= x <= 1.]
 
             # extract flux-surfaces
             self.eq.fluxsurfaces = {}
@@ -115,7 +122,7 @@ class LocalEquilibrium():
         else:
             self.x_grid = [self.x_loc]
 
-        self.eq.fluxsurfaces['fit_geo'] = {}
+        # generate the poloidal grid
         theta_min = 0
         theta_max = 2*np.pi
         for theta in self.eq.fluxsurfaces['theta_RZ']:
@@ -125,6 +132,7 @@ class LocalEquilibrium():
                 theta_max = np.max(theta)
         self.theta = np.linspace(theta_min,theta_max,self.n_theta)
 
+        # optimize the shape parameters
         opt_timing = 0.
         print('Optimising parametrisation fit of fluxsurfaces...')
         for i_x_loc,xfs in enumerate(self.x_grid):
@@ -161,8 +169,6 @@ class LocalEquilibrium():
                         for i_key,key in enumerate(self.param_labels):
                             if key in self.fs:
                                 self.param_initial[i_key] = copy.deepcopy(self.fs[key])
-                    print('params_initial {}: {}'.format(i_x_loc,self.param_initial))
-                
                 else:
                     # check if there are values for the shape parameters that can be used as initial condition
                     for i_key,key in enumerate(self.param_labels):
@@ -186,11 +192,13 @@ class LocalEquilibrium():
                                             loss='soft_l1', 
                                             verbose=diag_lsq)['x']
                 opt_timing += time.time()-time0
-                print('params {}: {}'.format(i_x_loc,self.params))
 
                 # add the final parameterised and interpolated 
                 params_keys = ['theta', 'R_param', 'Z_param', 'theta_ref', 'R_ref', 'Z_ref','R_ref_geo', 'Z_ref_geo']
-                params_values = [self.theta, self.R_param+self.params[0], self.Z_param+self.params[1], self.theta_ref, self.R_ref+self.params[0], self.Z_ref+self.params[1], self.R_ref_geo, self.Z_ref_geo]
+                if self._param == 'mxh':
+                    params_values = [self.theta, self.R_param+self.fs['R0'], self.Z_param+self.fs['Z0'], self.theta_ref, self.R_ref+self.fs['R0'], self.Z_ref+self.fs['Z0'], self.R_ref_geo, self.Z_ref_geo]
+                else:
+                    params_values = [self.theta, self.R_param+self.params[0], self.Z_param+self.params[1], self.theta_ref, self.R_ref+self.params[0], self.Z_ref+self.params[1], self.R_ref_geo, self.Z_ref_geo]
                 
                 for i_key,key in enumerate(params_keys):
                     self.fs.update({key:copy.deepcopy(params_values[i_key])})
@@ -232,8 +240,8 @@ class LocalEquilibrium():
         self.Z_ref = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref))
         self.Bt_ref  = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_ref[:-1])
 
+        # compute the self-consistent shape derivative parameters
         if param in ['miller','turnbull','turnbull_tilt','mxh']:
-            # compute the local gradients
             self.dxdr = np.gradient(self.eq.fluxsurfaces[x_label],self.eq.fluxsurfaces['fit_geo']['r'],edge_order=2)
             self.dpsidr = (self.dxdr*np.gradient(self.eq.fluxsurfaces['psi'],np.array(self.eq.fluxsurfaces[x_label])))[self.x_grid.index(self.x_loc)]
 
@@ -579,13 +587,17 @@ class LocalEquilibrium():
         return R_param, Z_param, theta_ref
 
     def mxh(self,shape,theta,norm=None):
-        # flux-surface coordinate parameterisation from [Arbon PPCF 61 (2021)]
-        [R0,Z0,r,kappa,c_0] = shape[:5]
+        # flux-surface coordinate parameterisation from [Arbon PPCF 63 (2020)]
+        R0 = (np.max(self.fs['R'][:-1])+np.min(self.fs['R'][:-1]))/2
+        Z0 = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
+        r = (np.max(self.fs['R'][:-1])-np.min(self.fs['R'][:-1]))/2
+        kappa = ((np.max(self.fs['Z'][:-1])-np.min(self.fs['Z'][:-1]))/2)/r
+        [c_0] = shape[:1]
         theta_R = theta + c_0
-        N = int((len(shape)-5)/2)
+        N = int((len(shape)-1)/2)
         for n in range(1,N+1):
-            c_n = shape[5 + (n-1)*2]
-            s_n = shape[6 + (n-1)*2]
+            c_n = shape[1 + (n-1)*2]
+            s_n = shape[2 + (n-1)*2]
             theta_R += c_n * np.cos(n * theta) + s_n * np.sin(n * theta)
 
         R_param = R0 + r * np.cos(theta_R)
@@ -600,13 +612,17 @@ class LocalEquilibrium():
         return R_param, Z_param, theta_ref
      
     def mxh_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
-        [R0,Z0,r,kappa,c_0] = shape[:5]
+        R0 = (np.max(self.fs['R'][:-1])+np.min(self.fs['R'][:-1]))/2
+        Z0 = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
+        r = (np.max(self.fs['R'][:-1])-np.min(self.fs['R'][:-1]))/2
+        kappa = ((np.max(self.fs['Z'][:-1])-np.min(self.fs['Z'][:-1]))/2)/r
+        [c_0] = shape[:1]
         theta_R = theta + c_0
         dtheta_Rdtheta = np.ones_like(theta)
-        N = int((len(shape)-5)/2)
+        N = int((len(shape)-1)/2)
         for n in range(1,N+1):
-            c_n = shape[5 + (n-1)*2]
-            s_n = shape[6 + (n-1)*2]
+            c_n = shape[1 + (n-1)*2]
+            s_n = shape[2 + (n-1)*2]
             theta_R +=  c_n * np.cos(n * theta) + s_n * np.sin(n * theta)
             dtheta_Rdtheta += (-n * c_n * np.sin(n * theta)) + (n * s_n * np.cos(n * theta))
         
@@ -648,11 +664,18 @@ class LocalEquilibrium():
     def cost_param(self,params):
         if self._param in ['mxh']:
             # update the flux-surface reference coordinates
-            self.R_ref = self.fs['R'][:-1] - params[0]
-            self.Z_ref = self.fs['Z'][:-1] - params[1]
+            R0 = (np.max(self.fs['R'][:-1])+np.min(self.fs['R'][:-1]))/2
+            Z0 = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
+            r = (np.max(self.fs['R'][:-1])-np.min(self.fs['R'][:-1]))/2
+            kappa = ((np.max(self.fs['Z'][:-1])-np.min(self.fs['Z'][:-1]))/2)/r
+            self.R_ref = self.fs['R'][:-1] - R0
+            self.Z_ref = self.fs['Z'][:-1] - Z0
+            #self.R_ref = self.fs['R'][:-1] - params[0]
+            #self.Z_ref = self.fs['Z'][:-1] - params[1]
 
             # update the theta-grid
-            self.theta = arcsin2pi(self.Z_ref/(params[2]*params[3]))
+            #self.theta = arcsin2pi(self.Z_ref/(params[2]*params[3]))
+            self.theta = arcsin2pi(self.Z_ref/(r*kappa))
             self.n_theta = len(self.theta)
 
             # compute the flux-surface parameterisation for a given shape set `params`
