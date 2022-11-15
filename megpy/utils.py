@@ -267,12 +267,17 @@ def merge_trees(source,target):
             if key not in target.keys():
                 target.update({key:[]})
 
-
 def zipsort(theta,x,y):
+    if not isinstance(theta,np.ndarray):
+        theta = np.array(theta)
     # sort 2D coordinates x,y by their polar angle theta to ensure theta_param=[0,2pi]
-    theta_xy_sorted = sorted(zip(theta,zip(x,y)))
-    theta_sorted = np.array(list(list(zip(*theta_xy_sorted))[0]))
-    x_sorted = np.array(list(list(zip(*list(zip(*theta_xy_sorted))[1]))[0]))
-    y_sorted = np.array(list(list(zip(*list(zip(*theta_xy_sorted))[1]))[1]))
+    #theta_xy_sorted = sorted(zip(theta,zip(x,y)))
+    #theta_sorted = np.array(list(list(zip(*theta_xy_sorted))[0]))
+    #x_sorted = np.array(list(list(zip(*list(zip(*theta_xy_sorted))[1]))[0]))
+    #y_sorted = np.array(list(list(zip(*list(zip(*theta_xy_sorted))[1]))[1]))
+    i_theta = theta.argsort()
+    theta_sorted = theta[i_theta]
+    x_sorted = x[i_theta]
+    y_sorted = y[i_theta]
 
     return theta_sorted,x_sorted,y_sorted
