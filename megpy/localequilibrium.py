@@ -21,7 +21,7 @@ from sys import stdout
 from .utils import *
 
 class LocalEquilibrium():
-    def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=10,n_theta=7200,n_harmonics=1,incl_analytic_geo=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=True):
+    def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=9,n_theta=7200,n_harmonics=1,incl_analytic_geo=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=True):
         self._params = {'miller':{
                              'param':self.miller,
                              'param_jr':self.miller_jr,
@@ -70,9 +70,9 @@ class LocalEquilibrium():
                          'mxh':{
                              'param':self.mxh,
                              'param_jr':self.mxh_jr,
-                             'param_initial':[0.]+list(np.zeros(2*n_harmonics)),
-                             'param_bounds':[[-2*np.pi]+list(-np.inf*np.ones(2*n_harmonics)),[2*np.pi]+list(np.inf*np.ones(2*n_harmonics))],
-                             'param_labels':['c_0']+[label for sublist in [['c_{}'.format(n),'s_{}'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
+                             'param_initial':[0.,0.,0.,1.,0.]+list(np.zeros(2*n_harmonics)),
+                             'param_bounds':[[0.,-np.inf,0.,0.,-2*np.pi]+list(-np.inf*np.ones(2*n_harmonics)),[np.inf,np.inf,np.inf,np.inf,2*np.pi]+list(np.inf*np.ones(2*n_harmonics))],
+                             'param_labels':['R0','Z0','r','kappa','c_0']+[label for sublist in [['c_{}'.format(n),'s_{}'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
                              'param_bpol':self.mxh_bp,
                              'deriv_initial':list(np.ones(4+2*n_harmonics)),
                              'deriv_bounds':[-np.inf,np.inf],
@@ -648,12 +648,13 @@ class LocalEquilibrium():
         Z0 = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
         r = (np.max(self.fs['R'][:-1])-np.min(self.fs['R'][:-1]))/2
         kappa = ((np.max(self.fs['Z'][:-1])-np.min(self.fs['Z'][:-1]))/2)/r
-        [c_0] = shape[:1]
+        shape[:4] = [R0,Z0,r,kappa]
+        c_0 = shape[4]
         theta_R = theta + c_0
-        N = int((len(shape)-1)/2)
+        N = int((len(shape)-5)/2)
         for n in range(1,N+1):
-            c_n = shape[1 + (n-1)*2]
-            s_n = shape[2 + (n-1)*2]
+            c_n = shape[5 + (n-1)*2]
+            s_n = shape[6 + (n-1)*2]
             theta_R += c_n * np.cos(n * theta) + s_n * np.sin(n * theta)
 
         R_param = R0 + r * np.cos(theta_R)
@@ -673,13 +674,13 @@ class LocalEquilibrium():
         Z0 = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
         r = (np.max(self.fs['R'][:-1])-np.min(self.fs['R'][:-1]))/2
         kappa = ((np.max(self.fs['Z'][:-1])-np.min(self.fs['Z'][:-1]))/2)/r
-        [c_0] = shape[:1]
+        c_0 = shape[4]
         theta_R = theta + c_0
         dtheta_Rdtheta = np.ones_like(theta)
-        N = int((len(shape)-1)/2)
+        N = int((len(shape)-5)/2)
         for n in range(1,N+1):
-            c_n = shape[1 + (n-1)*2]
-            s_n = shape[2 + (n-1)*2]
+            c_n = shape[5 + (n-1)*2]
+            s_n = shape[6 + (n-1)*2]
             theta_R +=  c_n * np.cos(n * theta) + s_n * np.sin(n * theta)
             dtheta_Rdtheta += (-n * c_n * np.sin(n * theta)) + (n * s_n * np.cos(n * theta))
         
