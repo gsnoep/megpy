@@ -17,6 +17,8 @@ import re
 import copy
 import numpy as np
 import time
+import json
+import codecs
 
 from scipy import interpolate, integrate
 from sys import stdout
@@ -274,6 +276,29 @@ class Equilibrium():
 
         else:
             print("g-eqdsk could not be written")
+
+        return
+
+    def read_json(self,path='./',fname='Equilibrium.json'):
+        with open(path+fname,'r') as file:
+            equilibrium_json = json.load(file)
+        
+        list_to_array(equilibrium_json)
+
+        self.raw = copy.deepcopy(equilibrium_json['raw'])
+        self.derived = copy.deepcopy(equilibrium_json['derived'])
+        self.fluxsurfaces = copy.deepcopy(equilibrium_json['fluxsurfaces'])
+
+        return self
+
+    def write_json(self,path='./',fname='Equilibrium.json',metadata=None):
+        equilibrium = {'raw':copy.deepcopy(self.raw),'derived':copy.deepcopy(self.derived),'fluxsurfaces':copy.deepcopy(self.fluxsurfaces)}
+        if metadata:
+            equilibrium.update({'metadata':metadata})
+        array_to_list(equilibrium)
+        json.dump(equilibrium, codecs.open(path+fname, 'w', encoding='utf-8'), separators=(',', ':'), indent=4)
+
+        print('Generated megpy.Equilibrium file at: {}'.format(path+fname))
 
         return
 
