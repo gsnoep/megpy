@@ -653,7 +653,7 @@ class LocalEquilibrium():
 
         return Bp_param
 
-    def miller_general(self,shape,theta,Lref,R0,Z0,norm=False):
+    def miller_general(self,shape,theta,Lref,R0,Z0,n_harmonics,norm=False):
         cN = shape[:n_harmonics]
         sN = [0.0]+list(shape)[n_harmonics+1:]
         rshape = np.zeros_like(theta)
