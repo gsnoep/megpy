@@ -7,6 +7,7 @@ A collection of general numerical or Python utilities useful across the framewor
 import numpy as np
 import os
 import copy
+from scipy import interpolate
 
 def number(x):
     """Check if x is actually a (real) number type (int,float).
@@ -281,3 +282,22 @@ def zipsort(theta,x,y):
     y_sorted = y[i_theta]
 
     return theta_sorted,x_sorted,y_sorted
+
+def interpolate_periodic(x_in,y_in,x_out):
+    """Interpolate data on a periodic basis between 0 and 2*pi
+
+    Args:
+        x_in (array): input periodic basis (sorted between 0 and 2*pi)
+        y_in (array): periodic data (sorted on an ascending basis between 0 and 2*pi)
+        x_out (array): output basis
+
+    Returns:
+        array: interpolated data
+    """
+    # extend the periodic data one period before and one beyond
+    x_extended = np.hstack(((x_in-2*np.pi),x_in,(x_in+2*np.pi)))
+    y_extended = np.hstack((y_in,y_in,y_in))
+    
+    # interpolate to [0,2*pi]
+    y_out = interpolate.interp1d(x_extended,y_extended,bounds_error=False,kind='slinear')(x_out)
+    return y_out
