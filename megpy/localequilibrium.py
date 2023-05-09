@@ -897,7 +897,27 @@ class LocalEquilibrium():
         miller_geo['Z_miller'] = fluxsurface['Z0']+miller_geo['kappa']*fluxsurface['r']*np.sin(fluxsurface['theta_RZ']+miller_geo['zeta']*np.sin(2*fluxsurface['theta_RZ']))
 
         return miller_geo
-    
+
+    def extract_fft_coef(fluxsurface,R0,Z0,theta,n_harmonics):
+
+        R_r = fluxsurface['R']
+        Z_r = fluxsurface['Z']
+        theta_RZ = fluxsurface['theta_RZ']
+
+        # sort the flux-surface coordinates between 0 and 2*pi
+        thetaRZ, Rr, Zr = zipsort(theta_RZ,R_r,Z_r)
+        aN_nonequidistant = np.sqrt((R_r-R0)**2+(Z_r-Z0)**2)
+        aN = interpolate_periodic(thetaRZ,aN_nonequidistant,theta)
+
+        fft_aN = np.fft.fft(aN[-1])
+        #keep up to nth_kept modes (typically around 30)
+        cN = 2.0*np.real(fft_aN)[0:n_harmonics]/len(theta)
+        cN[0] *= 0.5
+        sN = -2.0*np.imag(fft_aN)[0:n_harmonics]/len(theta)
+        sN[0] *= 0.5
+
+        return cN, sN
+
     # auxiliary functions
     def printer(self,printer,shape,labels,shape_bpol,labels_bpol,lref='a'):
         print('Printing input values for {} code...'.format(printer))
@@ -1005,7 +1025,6 @@ class LocalEquilibrium():
                 fs.update({key:self.eq.fluxsurfaces[key]})
             elif key in self.eq.derived:
                 fs.update({key:self.eq.derived[key]})
-
 
         for i_key,key in enumerate(fs.keys()):
             if '_opt' not in key:
