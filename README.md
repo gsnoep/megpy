@@ -25,10 +25,10 @@ To be added:
 - IDS
 
 # Supported flux surface geometries
-- Miller [(doi)]()
-- Turnbull-Miller [(doi)]
-- Fourier / generalised Miller [(doi)]()
-- Miller eXtended Harmonic (MXH) [(doi)]()
+- Miller [(doi)](https://doi.org/10.1063/1.872666)
+- Turnbull-Miller [(doi)](https://doi.org/10.1063/1.873380)
+- Fourier / generalised Miller [(doi)](https://doi.org/10.1088/0741-3335/51/10/105009)
+- Miller eXtended Harmonic (MXH) [(doi)](https://doi.org/10.1088/1361-6587/abc63b)
 
 # Citation
 If you use MEGPy in your research, please cite [(bibtex)](https://github.com/gsnoep/megpy/blob/main/citation.bib):
