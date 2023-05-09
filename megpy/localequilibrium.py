@@ -67,6 +67,18 @@ class LocalEquilibrium():
                              'deriv_bounds':[-np.inf,np.inf],
                              'deriv_labels':['d{}dr'.format(label) for label in ['R0','Z0']]+['d{}dr'.format(label) for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
                          },
+                         'miller_general':{
+                             'param':self.miller_general,
+                             'param_jr':self.miller_general_jr,
+                             'param_initial':list(np.zeros(2))+([1,0.,0.,1]+[0.,0.,0.,0.]*(n_harmonics-1)),#+list(np.random.rand(4*n_harmonics)),
+                             'param_bounds':[[0,-np.inf]+[-1]*(4*n_harmonics),[np.inf,np.inf]+[1]*(4*n_harmonics)],
+                             'param_labels':['R0','Z0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
+                             #'param_labels':['aR_0','aZ_0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
+                             'param_bpol':self.miller_general_bp,
+                             'deriv_initial':list(np.ones(2+4*n_harmonics)),
+                             'deriv_bounds':[-np.inf,np.inf],
+                             'deriv_labels':['d{}dr'.format(label) for label in ['R0','Z0']]+['d{}dr'.format(label) for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
+                         },
                          'mxh':{
                              'param':self.mxh,
                              'param_jr':self.mxh_jr,
