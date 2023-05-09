@@ -31,8 +31,8 @@ To be added:
 - Miller eXtended Harmonic (MXH) [(doi)]()
 
 # Citation
-If you use MEGPy in your research, please cite [(bibtex)](https://www.github.com/gsnoep/megpy/citation.bib):
->G. Snoep, J.T.W. Koenders, C. Bourdelle, J. Citrin and JET contributors, "Rapid and accurate flux-surface parameterization through constrained nonlinear optimisation," TBD
+If you use MEGPy in your research, please cite [(bibtex)](https://github.com/gsnoep/megpy/blob/main/citation.bib):
+>G. Snoep, J.T.W. Koenders, C. Bourdelle, J. Citrin and JET contributors, "Improved flux-surface parameterization through constrained nonlinear optimization," Physics of Plasmas, TBP (2023)
 
 
                     .#&%%%-.
