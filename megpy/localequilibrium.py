@@ -1,12 +1,13 @@
 """
-created by gsnoep on 11 August 2022, extract_analytic_geo method adapted from 'extract_miller_from_eqdsk.py' by dtold
+created by gsnoep on 11 August 2022, extract_analytic_shape method adapted from 'extract_miller_from_eqdsk.py' by dtold
 
 Module to handle any and all methods related to local magnetic geometry parametrisation.
 
 The LocalEquilibrium Class can:
-- parametrise a set of flux-surface coordinates 
--
--
+- parametrize a set of flux-surface coordinates 
+- extract analytic shape parameters as described by T Luce
+- extract FFT coefficients for Fourier expansion
+- print magnetic geometry input parameters for several microturbulence codes
 
 """
 import numpy as np
@@ -21,7 +22,7 @@ from sys import stdout
 from .utils import *
 
 class LocalEquilibrium():
-    def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=9,n_theta=7200,n_harmonics=1,incl_analytic_geo=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=True):
+    def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=9,n_theta=7200,n_harmonics=1,analytic_shape=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=True):
         self._params = {'miller':{
                              'param':self.miller,
                              'param_jr':self.miller_jr,
@@ -55,7 +56,7 @@ class LocalEquilibrium():
                          'fourier':{
                              'param':self.fourier,
                              'param_jr':self.fourier_jr,
-                             'param_initial':list(np.zeros(2))+([1,0.,0.,1]+[0.,0.,0.,0.]*(n_harmonics-1)),#+list(np.random.rand(4*n_harmonics)),
+                             'param_initial':list(np.zeros(2))+([1,0.,0.,1]+[0.,0.,0.,0.]*(n_harmonics-1)),
                              'param_bounds':[[0,-np.inf]+[-1]*(4*n_harmonics),[np.inf,np.inf]+[1]*(4*n_harmonics)],
                              'param_labels':['R0','Z0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
                              #'param_labels':['aR_0','aZ_0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
@@ -66,13 +67,12 @@ class LocalEquilibrium():
                          'miller_general':{
                              'param':self.miller_general,
                              'param_jr':self.miller_general_jr,
-                             'param_initial':list(np.zeros(2))+([1,0.,0.,1]+[0.,0.,0.,0.]*(n_harmonics-1)),#+list(np.random.rand(4*n_harmonics)),
-                             'param_bounds':[[0,-np.inf]+[-1]*(4*n_harmonics),[np.inf,np.inf]+[1]*(4*n_harmonics)],
-                             'param_labels':['R0','Z0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
-                             #'param_labels':['aR_0','aZ_0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
-                             'deriv_initial':list(np.ones(2+4*n_harmonics)),
+                             'param_initial':([0.5,0.5]+[0.,0.]*(n_harmonics-1)),
+                             'param_bounds':[-np.inf,np.inf],
+                             'param_labels':[label for sublist in [['cN_{}'.format(n),'sN_{}'.format(n)] for n in range(0,n_harmonics)] for label in sublist],
+                             'deriv_initial':list(np.ones(2*n_harmonics)),
                              'deriv_bounds':[-np.inf,np.inf],
-                             'deriv_labels':['d{}dr'.format(label) for label in ['R0','Z0']]+['d{}dr'.format(label) for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
+                             'deriv_labels':['d{}dr'.format(label) for sublist in [['cN_{}'.format(n),'sN_{}'.format(n)] for n in range(0,n_harmonics)] for label in sublist],
                          },
                          'mxh':{
                              'param':self.mxh,
@@ -94,14 +94,13 @@ class LocalEquilibrium():
         # copy the equilibrium
         self.eq = copy.deepcopy(equilibrium)
 
-        # initialise the LocalEquilibrium object methods consistent with the method input
+        # initialize the LocalEquilibrium object methods consistent with the method input
         self._param = param
         self.param = self._params[param]['param']
         self.param_jr = self._params[param]['param_jr']
         self.param_initial = self._params[param]['param_initial']
         self.param_bounds = self._params[param]['param_bounds']
         self.param_labels = self._params[param]['param_labels']
-        self.param_bpol = self._params[param]['param_bpol']
         self.deriv_initial = self._params[param]['deriv_initial']
         self.deriv_bounds = self._params[param]['deriv_bounds']
         self.deriv_labels = self._params[param]['deriv_labels']
@@ -123,7 +122,7 @@ class LocalEquilibrium():
 
             # extract flux-surfaces
             self.eq.fluxsurfaces = {}
-            self.eq.add_fluxsurfaces(x=self.x_grid,x_label=x_label,incl_analytic_geo=True,incl_B=[x==self.x_loc for x in self.x_grid],verbose=self.verbose)
+            self.eq.add_fluxsurfaces(x=self.x_grid,x_label=x_label,analytic_shape=analytic_shape,incl_B=[x==self.x_loc for x in self.x_grid],verbose=self.verbose)
         # use case 2: integrated in Equilibrium API
         else:
             self.x_grid = [self.x_loc]
@@ -136,7 +135,8 @@ class LocalEquilibrium():
                 theta_min = np.min(theta)
             if np.max(theta) < theta_max:
                 theta_max = np.max(theta)
-        self.theta = np.linspace(theta_min,theta_max,self.n_theta)
+        #self.theta = np.linspace(theta_min,theta_max,self.n_theta)
+        self.theta = np.linspace(0,2,n_theta)*np.pi
 
         # add equilibrium sub-tree for fit data
         self.eq.fluxsurfaces['fit_geo'] = {}
@@ -146,25 +146,33 @@ class LocalEquilibrium():
         print('Optimising parametrisation fit of fluxsurfaces...')
         for i_x_loc,xfs in enumerate(self.x_grid):
             with np.errstate(divide='ignore',invalid='ignore'):
-                # per flux-surface extract a dict with all the values from the equilibrium
+                # gather all the flux-surface quantities from the equilibrium
                 self.fs = {}
-                for key in set(['R','Z','R0','Z0','theta_RZ','r','psi','q']+self.param_labels):
+                for key in set(['R','Z','R0','Z0','theta_RZ','r']+self.param_labels):
                     if key in self.eq.fluxsurfaces:
                         quantity = copy.deepcopy(self.eq.fluxsurfaces[key][i_x_loc])
-                        if isinstance(quantity,list):
-                            self.fs.update({key:np.array(quantity)})
-                        else:
-                            self.fs.update({key:quantity})
-
-                if 'miller_geo' in self.eq.fluxsurfaces:
+                        self.fs.update({key:quantity})
+                if analytic_shape:
                     self.fs['miller_geo'] = {}
                     for key in self.eq.fluxsurfaces['miller_geo']:
                         quantity = copy.deepcopy(self.eq.fluxsurfaces['miller_geo'][key][i_x_loc])
-                        if isinstance(quantity,list):
-                            self.fs['miller_geo'].update({key:np.array(quantity)})
-                        else:
-                            self.fs['miller_geo'].update({key:quantity})
-                
+                        self.fs['miller_geo'].update({key:quantity})
+                list_to_array(self.fs)
+
+                # set the initial shape condition for the optimization routine
+                '''
+                # set the previous optimization solution as the initial condition
+                if i_x_loc >= 1:
+                    self.param_initial = copy.deepcopy(self.params)
+                else:
+                    # check if there are values for the shape parameters that can be used as initial condition
+                    for i_key,key in enumerate(self.param_labels):
+                        if key in self.fs['miller_geo']:
+                            self.param_initial[i_key] = copy.deepcopy(self.fs['miller_geo'][key])
+                        elif key in self.fs:
+                            self.param_initial[i_key] = copy.deepcopy(self.fs[key])
+                '''
+
                 if self._param == 'mxh':
                     self.fs['R0'] = (np.max(self.fs['R'][:-1])+np.min(self.fs['R'][:-1]))/2
                     self.fs['Z0'] = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
@@ -178,6 +186,13 @@ class LocalEquilibrium():
                         for i_key,key in enumerate(self.param_labels):
                             if key in self.fs:
                                 self.param_initial[i_key] = copy.deepcopy(self.fs[key])
+                elif self._param == 'miller_general':
+                    if i_x_loc >= 1:
+                        self.param_initial = copy.deepcopy(self.params)
+                    else:
+                        fluxsurface = {'R':self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)],'Z':self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)],'theta_RZ':self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)]}
+                        cN,sN = self.extract_fft_shape(fluxsurface,self.eq.fluxsurfaces['R0'][self.x_grid.index(self.x_loc)],self.eq.fluxsurfaces['Z0'][self.x_grid.index(self.x_loc)],self.theta,n_harmonics)
+                        self.param_initial = list(cN)+list(sN)
                 else:
                     # check if there are values for the shape parameters that can be used as initial condition
                     for i_key,key in enumerate(self.param_labels):
@@ -189,12 +204,12 @@ class LocalEquilibrium():
                     if self._param == 'fourier' and i_x_loc >= 1:
                         self.param_initial = copy.deepcopy(self.params)
 
-                self.R_geo, self.Z_geo, self.theta_ref_geo = self.param(self.param_initial, np.append(self.theta,self.theta[0]), norm=False)
-                self.R_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
-                self.Z_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
+                #self.R_geo, self.Z_geo, self.theta_ref_geo = self.param(self.param_initial, np.append(self.theta,self.theta[0]), norm=False)
+                #self.R_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
+                #self.Z_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
 
                 time0 = time.time()
-                # compute the optimised shape parameters
+                # compute the optimized shape parameters
                 self.params = least_squares(self.cost_param, 
                                             self.param_initial, 
                                             bounds=self.param_bounds, 
@@ -206,12 +221,12 @@ class LocalEquilibrium():
                 opt_timing += time.time()-time0
                 #print('Optimization time pp:{}'.format(opt_timing))
 
-                # add the final parameterised and interpolated 
-                params_keys = ['theta', 'R_param', 'Z_param', 'theta_ref', 'R_ref', 'Z_ref','R_ref_geo', 'Z_ref_geo']
+                # add the final parameterized and interpolated 
+                params_keys = ['theta', 'R_param', 'Z_param', 'theta_ref', 'R_ref', 'Z_ref']#,'R_ref_geo', 'Z_ref_geo']
                 if self._param in ['mxh']:
-                    params_values = [self.theta, self.R_param+self.fs['R0'], self.Z_param+self.fs['Z0'], self.theta_ref, self.R_ref+self.fs['R0'], self.Z_ref+self.fs['Z0'], self.R_ref_geo, self.Z_ref_geo]
+                    params_values = [self.theta, self.R_param+self.fs['R0'], self.Z_param+self.fs['Z0'], self.theta_ref, self.R_ref+self.fs['R0'], self.Z_ref+self.fs['Z0']]#, self.R_ref_geo, self.Z_ref_geo]
                 else:
-                    params_values = [self.theta, self.R_param+self.params[0], self.Z_param+self.params[1], self.theta_ref, self.R_ref+self.params[0], self.Z_ref+self.params[1], self.R_ref_geo, self.Z_ref_geo]
+                    params_values = [self.theta, self.R_param+self.params[0], self.Z_param+self.params[1], self.theta_ref, self.R_ref+self.params[0], self.Z_ref+self.params[1]]#, self.R_ref_geo, self.Z_ref_geo]
                 
                 for i_key,key in enumerate(params_keys):
                     self.fs.update({key:copy.deepcopy(params_values[i_key])})
@@ -220,7 +235,7 @@ class LocalEquilibrium():
                 if xfs == self.x_loc:
                     self.shape = copy.deepcopy(self.params)
 
-                # label and add the optimised shape parameters to the flux-surface dict
+                # label and add the optimized shape parameters to the flux-surface dict
                 for i_key, key in enumerate(self.param_labels):
                     self.fs.update({key:self.params[i_key]})
                 
@@ -258,43 +273,42 @@ class LocalEquilibrium():
         self.Bt_ref  = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_ref[:-1])
 
         # compute the self-consistent shape derivative parameters
-        if self._param in ['miller','turnbull','turnbull_tilt','fourier','mxh']:
-            self.dxdr = np.gradient(self.eq.fluxsurfaces[x_label],self.eq.fluxsurfaces['fit_geo']['r'],edge_order=2)
-            self.dpsidr = (self.dxdr*np.gradient(self.eq.fluxsurfaces['psi'],np.array(self.eq.fluxsurfaces[x_label])))[self.x_grid.index(self.x_loc)]
-            self.Bunit = (self.eq.fluxsurfaces['q']/self.eq.fluxsurfaces['fit_geo']['r'])[self.x_grid.index(self.x_loc)]*self.dpsidr
+        self.dxdr = np.gradient(self.eq.fluxsurfaces[x_label],self.eq.fluxsurfaces['fit_geo']['r'],edge_order=2)
+        self.dpsidr = (self.dxdr*np.gradient(self.eq.fluxsurfaces['psi'],np.array(self.eq.fluxsurfaces[x_label])))[self.x_grid.index(self.x_loc)]
+        self.Bunit = (self.eq.fluxsurfaces['q']/self.eq.fluxsurfaces['fit_geo']['r'])[self.x_grid.index(self.x_loc)]*self.dpsidr
 
-            self.shape_deriv = []
-            s_deriv = {}
-            if 'kappa' in self.param_labels or 'kappa' in self.fs:
-                s_deriv.update({'s_kappa':self.eq.fluxsurfaces['fit_geo']['r']*self.dxdr*np.gradient(np.log(self.eq.fluxsurfaces['fit_geo']['kappa']),np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)})
-            if 'delta' in self.param_labels:
-                s_deriv.update({'s_delta':(self.eq.fluxsurfaces['fit_geo']['r']/np.sqrt(1-self.eq.fluxsurfaces['fit_geo']['delta']**2))*self.dxdr*np.gradient(self.eq.fluxsurfaces['fit_geo']['delta'],np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)})
-            
-            for i_key,key in enumerate(self.deriv_labels):
-                key_param = None
-                if key in s_deriv.keys():
-                    self.eq.fluxsurfaces['fit_geo'][key] = s_deriv[key]
-                else:
-                    if 'dr' in key:
-                        key_param = (key.split('dr')[0]).split('d')[1]
-                    elif 's_' in key:
-                        key_param = key.split('s_')[1]
-                    if param not in ['fourier'] and key_param not in ['R0','Z0']:
-                        self.eq.fluxsurfaces['fit_geo'][key] = self.eq.fluxsurfaces['fit_geo']['r']*self.dxdr*np.gradient(self.eq.fluxsurfaces['fit_geo'][key_param],np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)
-                    else:
-                        self.eq.fluxsurfaces['fit_geo'][key] = self.dxdr*np.gradient(np.array(self.eq.fluxsurfaces['fit_geo'][key_param]),np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)
-
-                self.shape_deriv.append(self.eq.fluxsurfaces['fit_geo'][key][self.x_grid.index(self.x_loc)])
-
-            self.dRdtheta_param, self.dZdtheta_param, self.dRdr_param, self.dZdr_param, self.J_r_param = self.param_jr(self.shape,self.shape_deriv,self.theta,self.R_param[:-1],return_deriv=True)
-            self.Bp_param = self.param_bpol(self.param_jr, self.shape, self.shape_deriv, self.theta, self.R_param[:-1], self.dpsidr)
-            if self._param != 'mxh':
-                self.Bp_ref = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref[:-1]))
-            else:
-                self.Bp_ref = self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1]
-            self.shape_deriv_ref = copy.deepcopy(self.shape_deriv)
+        self.shape_deriv = []
+        s_deriv = {}
+        if 'kappa' in self.param_labels or 'kappa' in self.fs:
+            s_deriv.update({'s_kappa':self.eq.fluxsurfaces['fit_geo']['r']*self.dxdr*np.gradient(np.log(self.eq.fluxsurfaces['fit_geo']['kappa']),np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)})
+        if 'delta' in self.param_labels:
+            s_deriv.update({'s_delta':(self.eq.fluxsurfaces['fit_geo']['r']/np.sqrt(1-self.eq.fluxsurfaces['fit_geo']['delta']**2))*self.dxdr*np.gradient(self.eq.fluxsurfaces['fit_geo']['delta'],np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)})
         
-        if incl_analytic_geo:
+        for i_key,key in enumerate(self.deriv_labels):
+            key_param = None
+            if key in s_deriv.keys():
+                self.eq.fluxsurfaces['fit_geo'][key] = s_deriv[key]
+            else:
+                if 'dr' in key:
+                    key_param = (key.split('dr')[0]).split('d')[1]
+                elif 's_' in key:
+                    key_param = key.split('s_')[1]
+                if param not in ['fourier','miller_general'] and key_param not in ['R0','Z0']:
+                    self.eq.fluxsurfaces['fit_geo'][key] = self.eq.fluxsurfaces['fit_geo']['r']*self.dxdr*np.gradient(self.eq.fluxsurfaces['fit_geo'][key_param],np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)
+                else:
+                    self.eq.fluxsurfaces['fit_geo'][key] = self.dxdr*np.gradient(np.array(self.eq.fluxsurfaces['fit_geo'][key_param]),np.array(self.eq.fluxsurfaces[x_label]),edge_order=2)
+
+            self.shape_deriv.append(self.eq.fluxsurfaces['fit_geo'][key][self.x_grid.index(self.x_loc)])
+
+        self.dRdtheta_param, self.dZdtheta_param, self.dRdr_param, self.dZdr_param, self.J_r_param = self.param_jr(self.shape,self.shape_deriv,self.theta,self.R_param[:-1],return_deriv=True)
+        self.Bp_param = self.param_bpol(self.param_jr, self.shape, self.shape_deriv, self.theta, self.R_param[:-1], self.dpsidr)
+        if self._param != 'mxh':
+            self.Bp_ref = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref[:-1]))
+        else:
+            self.Bp_ref = self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1]
+        self.shape_deriv_ref = copy.deepcopy(self.shape_deriv)
+        
+        if analytic_shape:
             print('Computing analytical Miller geometry quantities...')
             self.shape_analytic = []
             for key in self._params['turnbull']['param_labels']:
@@ -320,7 +334,7 @@ class LocalEquilibrium():
             self.Z_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
             self.Bt_ref_geo  = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_ref_geo[:-1])
 
-            self.Bp_geo = self.turnbull_bp(self.shape_analytic, self.shape_deriv_analytic, self.theta, self.R_geo[:-1], self.dpsidr)
+            self.Bp_geo = self.param_bpol(self.turnbull_jr,self.shape_analytic, self.shape_deriv_analytic, self.theta, self.R_geo[:-1], self.dpsidr,method='analytic')
             self.Bp_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref_geo[:-1]))
 
         if opt_bpol:
@@ -551,32 +565,44 @@ class LocalEquilibrium():
         else:
             return J_r
 
-    def miller_general(self,shape,theta,Lref,R0,Z0,n_harmonics,norm=False):
+    def miller_general(self,shape,theta,norm=False):
+        # Fourier expansion flux-surface coordinate parameterization from GENE
+        n_harmonics = int(len(shape)/2)
+        self.R0 = self.eq.fluxsurfaces['R0'][self.x_grid.index(self.x_loc)]
+        self.Z0 = self.eq.fluxsurfaces['Z0'][self.x_grid.index(self.x_loc)]
+
+        # enfore sN_0 = 0.0
+        shape[n_harmonics] = 0.0
         cN = shape[:n_harmonics]
-        sN = [0.0]+list(shape)[n_harmonics+1:]
+        sN = shape[n_harmonics:]
         rshape = np.zeros_like(theta)
         for n,c in enumerate(cN):
-            rshape += cN[n]*np.cos(n*theta) + sN[n]*np.sin(n*theta)
-        R_param = R0 + rshape * Lref * np.cos(theta)
-        Z_param = Z0 + rshape * Lref * np.sin(theta)
+            rshape += cN[n] * np.cos(n*theta) + sN[n] * np.sin(n*theta)
+        R_param = self.R0 + rshape * np.cos(theta)
+        Z_param = self.Z0 + rshape * np.sin(theta)
 
-        theta_ref = arctan2pi(Z_param-Z0,R_param-R0)
+        theta_ref = arctan2pi(Z_param-self.Z0,R_param-self.R0)
 
         if norm:
-            R_param-=R0
-            Z_param-=Z0
+            R_param-=self.R0
+            Z_param-=self.Z0
 
         return R_param, Z_param, theta_ref
 
-    def miller_general_jr(self,cN,sN,cN_dr,sN_dr,theta,R,Lref,return_deriv=True):
-        # flux-surface coordinate parameterization from [Candy PPCF 51 (2009)]
+    def miller_general_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        # Fourier expansion flux-surface coordinate parameterization from GENE
+        n_harmonics = int(len(shape)/2)
+        cN = shape[:n_harmonics]
+        sN = [0.0]+list(shape)[n_harmonics+1:]
+        cN_dr = shape_deriv[:n_harmonics]
+        sN_dr = [0.0]+list(shape_deriv)[n_harmonics+1:]
         rShape = np.zeros_like(theta)
         drShapedr = np.zeros_like(theta)
         drShapedtheta = np.zeros_like(theta)
         for n,c in enumerate(cN):
-            rShape += cN[n]* Lref *np.cos(n*theta) + sN[n]* Lref *np.sin(n*theta)
-            drShapedr += cN_dr[n]* np.cos(n*theta) + sN_dr[n]* np.sin(n*theta)
-            drShapedtheta += -cN[n]* Lref *n*np.sin(n*theta) + sN[n]* Lref *n*np.cos(n*theta)
+            rShape += cN[n] * np.cos(n*theta) + sN[n] * np.sin(n*theta)
+            drShapedr += cN_dr[n] * np.cos(n*theta) + sN_dr[n] * np.sin(n*theta)
+            drShapedtheta += -cN[n] * n * np.sin(n*theta) + sN[n] * n * np.cos(n*theta)
 
         dRdtheta = drShapedtheta * np.cos(theta) - rShape * np.sin(theta)
         dZdtheta = drShapedtheta * np.sin(theta) + rShape * np.cos(theta)
@@ -658,54 +684,55 @@ class LocalEquilibrium():
             return J_r
 
     # bpol parameterization
-    def bpol(self,param_jr,shape,shape_deriv,theta,R,dpsidr,method='jacobian',verbose=True):
-        if method=='analytic' and param_jr in [self.miller_jr,self.turnbull_jr,self.turnbull_tilt_jr]:
-            if param_jr==self.miller_jr:
-                # define the parameters
-                [R0,Z0,r,kappa,delta] = shape
-                [dR0dr,dZ0dr,s_kappa,s_delta] = shape_deriv
-                with np.errstate(invalid='ignore'):
-                    x = np.arcsin(delta)
-                theta_R = theta + x * np.sin(theta)
+    def param_bpol(self,param_jr,shape,shape_deriv,theta,R,dpsidr,method='jacobian',verbose=True):
+        if method=='analytic':
+            if param_jr in [self.miller_jr,self.turnbull_jr,self.turnbull_tilt_jr]:
+                if param_jr==self.miller_jr:
+                    # define the parameters
+                    [R0,Z0,r,kappa,delta] = shape
+                    [dR0dr,dZ0dr,s_kappa,s_delta] = shape_deriv
+                    with np.errstate(invalid='ignore'):
+                        x = np.arcsin(delta)
+                    theta_R = theta + x * np.sin(theta)
+                    
+                    Bp_nom = np.sqrt(np.sin(theta_R)**2 + (1 + x * np.cos(theta))**2 + kappa**2 * np.cos(theta)**2)
+                    Bp_denom = kappa * (np.cos(x * np.sin(theta)) + dR0dr * np.cos(theta) + (s_kappa - s_delta * np.cos(theta) + (1+ s_kappa) * x * np.cos(theta)) * np.sin(theta) * np.sin(theta_R))
                 
-                Bp_nom = np.sqrt(np.sin(theta_R)**2 + (1 + x * np.cos(theta))**2 + kappa**2 * np.cos(theta)**2)
-                Bp_denom = kappa * (np.cos(x * np.sin(theta)) + dR0dr * np.cos(theta) + (s_kappa - s_delta * np.cos(theta) + (1+ s_kappa) * x * np.cos(theta)) * np.sin(theta) * np.sin(theta_R))
-            
-            elif param_jr == self.turnbull_jr:
-                # define the parameters
-                [R0,Z0,r,kappa,delta,zeta] = shape
-                [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta] = shape_deriv
-                with np.errstate(invalid='ignore'):
-                    x = np.arcsin(delta)
-                theta_R = theta + x * np.sin(theta)
-                dtheta_Rdtheta = 1 + x * np.cos(theta)
-                theta_Z = theta + zeta * np.sin(2 * theta)
-                dtheta_Zdtheta = 1 + 2 * zeta * np.cos(2 * theta)
+                elif param_jr == self.turnbull_jr:
+                    # define the parameters
+                    [R0,Z0,r,kappa,delta,zeta] = shape
+                    [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta] = shape_deriv
+                    with np.errstate(invalid='ignore'):
+                        x = np.arcsin(delta)
+                    theta_R = theta + x * np.sin(theta)
+                    dtheta_Rdtheta = 1 + x * np.cos(theta)
+                    theta_Z = theta + zeta * np.sin(2 * theta)
+                    dtheta_Zdtheta = 1 + 2 * zeta * np.cos(2 * theta)
 
-                Bp_nom = np.sqrt(np.sin(theta_R)**2 * dtheta_Rdtheta**2 + kappa**2 * np.cos(theta_Z)**2 * dtheta_Zdtheta**2)
-                Bp_denom = kappa * np.cos(theta_Z) * dtheta_Zdtheta * (dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)) + np.sin(theta_R) * dtheta_Rdtheta * (dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z)))
+                    Bp_nom = np.sqrt(np.sin(theta_R)**2 * dtheta_Rdtheta**2 + kappa**2 * np.cos(theta_Z)**2 * dtheta_Zdtheta**2)
+                    Bp_denom = kappa * np.cos(theta_Z) * dtheta_Zdtheta * (dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)) + np.sin(theta_R) * dtheta_Rdtheta * (dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z)))
 
-            elif param_jr == self.turnbull_tilt_jr:
-                # define the parameters
-                [R0,Z0,r,kappa,delta,zeta,tilt] = shape
-                [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta,s_tilt] = shape_deriv
-                with np.errstate(invalid='ignore'):
-                    x = np.arcsin(delta)
-                theta_R = theta + x * np.sin(theta) + tilt
-                dtheta_Rdtheta = 1 + x * np.cos(theta)
-                theta_Z = theta + zeta * np.sin(2 * theta)
-                dtheta_Zdtheta = 1 + 2 * zeta * np.cos(2 * theta)
+                elif param_jr == self.turnbull_tilt_jr:
+                    # define the parameters
+                    [R0,Z0,r,kappa,delta,zeta,tilt] = shape
+                    [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta,s_tilt] = shape_deriv
+                    with np.errstate(invalid='ignore'):
+                        x = np.arcsin(delta)
+                    theta_R = theta + x * np.sin(theta) + tilt
+                    dtheta_Rdtheta = 1 + x * np.cos(theta)
+                    theta_Z = theta + zeta * np.sin(2 * theta)
+                    dtheta_Zdtheta = 1 + 2 * zeta * np.cos(2 * theta)
 
-                Bp_nom = np.sqrt(np.sin(theta_R)**2 * dtheta_Rdtheta**2 + kappa**2 * np.cos(theta_Z)**2 * dtheta_Zdtheta**2)
-                Bp_denom = kappa * np.cos(theta_Z) * dtheta_Zdtheta * (dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R) + s_tilt) + np.sin(theta_R) * dtheta_Rdtheta * (dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z)))
+                    Bp_nom = np.sqrt(np.sin(theta_R)**2 * dtheta_Rdtheta**2 + kappa**2 * np.cos(theta_Z)**2 * dtheta_Zdtheta**2)
+                    Bp_denom = kappa * np.cos(theta_Z) * dtheta_Zdtheta * (dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R) + s_tilt) + np.sin(theta_R) * dtheta_Rdtheta * (dZ0dr + kappa * ((s_kappa + 1) * np.sin(theta_Z) + s_zeta * np.sin(2 * theta) * np.cos(theta_Z)))
 
-            grad_r_norm =  Bp_nom / Bp_denom
-        else:
-            method = 'jacobian'
-            if verbose:
-                print('Bpol method `analytic` is not available for the chosen parameterization, switching to `jacobian`...')
+                grad_r_norm =  Bp_nom / Bp_denom
+            else:
+                method = 'jacobian'
+                if verbose:
+                    print("Bpol method `analytic' is not available for the chosen parameterization, switching to `jacobian'...")
         
-        if method=='jacobian':
+        elif method=='jacobian':
             dRdtheta, dZdtheta, dRdr, dZdr, J_r = param_jr(shape,shape_deriv,theta,R,return_deriv=True)
 
             # compute the Mercier-Luc arclength derivative and |grad r|
@@ -741,9 +768,16 @@ class LocalEquilibrium():
             # compute the flux-surface parameterization for a given shape set `params`
             self.R_param, self.Z_param, self.theta_ref = self.param(params, self.theta, norm=True)
 
-            # interpolate the actual flux-surface contour to the theta basis 
-            self.R_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'][:-1], self.fs['R'][:-1], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[0]
-            self.Z_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'][:-1], self.fs['Z'][:-1], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[1]
+            if self._param == 'miller_general':
+                # interpolate the actual flux-surface contour to the theta basis 
+                #self.R_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'][:-1], self.fs['R'][:-1], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - self.R0
+                #self.Z_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'][:-1], self.fs['Z'][:-1], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - self.Z0
+                self.R_ref = np.array(interpolate_periodic(self.fs['theta_RZ'][:-1], self.fs['R'][:-1],self.theta_ref)) - self.R0
+                self.Z_ref = np.array(interpolate_periodic(self.fs['theta_RZ'][:-1], self.fs['Z'][:-1],self.theta_ref)) - self.Z0
+            else:
+                # interpolate the actual flux-surface contour to the theta basis 
+                self.R_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'][:-1], self.fs['R'][:-1], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[0]
+                self.Z_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'][:-1], self.fs['Z'][:-1], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - params[1]
 
         # define the cost function
         L1_norm = np.abs(np.array([self.R_param,self.Z_param])-np.array([self.R_ref,self.Z_ref])).flatten()
@@ -785,7 +819,7 @@ class LocalEquilibrium():
         return cost
 
     # extraction tools
-    def extract_analytic_geo(fluxsurface):
+    def extract_analytic_shape(fluxsurface):
         """Extract Turnbull-Miller geometry parameters [Turnbull PoP 6 1113 (1999)] from a flux-surface contour. Adapted from 'extract_miller_from_eqdsk.py' by D. Told.
 
         Args:
@@ -832,19 +866,21 @@ class LocalEquilibrium():
 
         return miller_geo
 
-    def extract_fft_coef(fluxsurface,R0,Z0,theta,n_harmonics):
+    def extract_fft_shape(self,fluxsurface,R0,Z0,theta,n_harmonics):
 
         R_r = fluxsurface['R']
         Z_r = fluxsurface['Z']
         theta_RZ = fluxsurface['theta_RZ']
 
         # sort the flux-surface coordinates between 0 and 2*pi
-        thetaRZ, Rr, Zr = zipsort(theta_RZ,R_r,Z_r)
-        aN_nonequidistant = np.sqrt((R_r-R0)**2+(Z_r-Z0)**2)
-        aN = interpolate_periodic(thetaRZ,aN_nonequidistant,theta)
+        theta_RZ, R_r, Z_r = zipsort(theta_RZ,R_r,Z_r)
+        aN_r = np.sqrt((R_r-R0)**2+(Z_r-Z0)**2)
+        aN_equidistant = interpolate_periodic(theta_RZ,aN_r,theta)
 
-        fft_aN = np.fft.fft(aN[-1])
-        #keep up to nth_kept modes (typically around 30)
+        # take FFT of the flux-surface distance aN
+        fft_aN = np.fft.fft(aN_equidistant)
+        
+        # truncate at n_harmonics, NOTE: for `miller_general` in GENE n_harmonics <=32
         cN = 2.0*np.real(fft_aN)[0:n_harmonics]/len(theta)
         cN[0] *= 0.5
         sN = -2.0*np.imag(fft_aN)[0:n_harmonics]/len(theta)
