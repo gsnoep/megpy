@@ -303,7 +303,7 @@ class Equilibrium():
         return
 
     ## physics functions
-    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,incl_analytic_geo=False,incl_B=False,tracer_diag=None):
+    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,tracer_diag=None):
         """Add quantities derived from the raw `Equilibrium.read_geqdsk()` output, such as phi, rho_pol, rho_tor to the `Equilibrium` object.
         Can also be called directly if `f_path` is defined.
 
@@ -312,7 +312,7 @@ class Equilibrium():
             `refine` (int): the number of desired `Equilibrium` grid points, if the native refine is lower than this value, it is refined using the `refine()` method
             `just_derived` (bool): [True] return only the derived quantities dictionary, or [False, default] return the `Equilibrium` object
             `incl_fluxsurfaces` (bool): include fluxsurface tracing output in the added derived quantities
-            `incl_analytic_geo` (bool): include the analytical flux surface Miller shaping parameters as defined in literature. Defaults to False.
+            `analytic_shape` (bool): include the analytical flux surface Miller shaping parameters as defined in literature. Defaults to False.
 
         Returns:
             self or dict if just_derived
@@ -417,21 +417,21 @@ class Equilibrium():
         derived['B_tor_rz'] = interpolate.interp1d(derived['psi'],derived['fpol'],bounds_error=False,fill_value='extrapolate')(derived['psirz'])/R
 
         if incl_fluxsurfaces:
-            self.add_fluxsurfaces(refine=refine,incl_analytic_geo=incl_analytic_geo,incl_B=incl_B,tracer_diag=tracer_diag)
+            self.add_fluxsurfaces(refine=refine,analytic_shape=analytic_shape,incl_B=incl_B,tracer_diag=tracer_diag)
               
         if just_derived:
             return self.derived 
         else:
             return self
 
-    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,incl_analytic_geo=False,incl_B=False,tracer_diag=None,verbose=False):
+    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,analytic_shape=False,incl_B=False,tracer_diag=None,verbose=False):
         """Add flux surfaces to an `Equilibrium`.
         
         Args:
             `raw` (dict, optional):  the raw `Equilibrium` data, [default] self.raw if None is set.
             `derived` (dict, optional): the derived `Equilibrium` quantities, [default] self.derived if None is set.
             `fluxsurfaces` (dict, optional): the `Equilibrium` flux surface data, each key a variable containing an array, [default] self.fluxsurfaces if None is set.
-            `incl_analytic_geo` (bool, optional): [True] include the flux surface Miller shaping parameters delta, kappa and zeta, or [False, default] not.
+            `analytic_shape` (bool, optional): [True] include the flux surface Miller shaping parameters delta, kappa and zeta, or [False, default] not.
 
         Returns:
             self.
@@ -496,9 +496,9 @@ class Equilibrium():
                     # check that rho stays inside the lcfs
                     if x_fs > 0 and x_fs < 0.999:
                         # compute the psi level of the flux surface
-                        psi_fs = interpolate.interp1d(derived[x_label],derived['psi'])(x_fs)
-                        q_fs = interpolate.interp1d(derived[x_label],derived['qpsi'])(x_fs)
-                        fpol_fs = interpolate.interp1d(derived[x_label],derived['fpol'])(x_fs)
+                        psi_fs = float(interpolate.interp1d(derived[x_label],derived['psi'])(x_fs))
+                        q_fs = float(interpolate.interp1d(derived[x_label],derived['qpsi'])(x_fs))
+                        fpol_fs = float(interpolate.interp1d(derived[x_label],derived['fpol'])(x_fs))
                         
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
@@ -515,9 +515,9 @@ class Equilibrium():
                         del fs['label']
                         del fs['level']
 
-                        if incl_analytic_geo:
+                        if analytic_shape:
                             time1 = time.time()
-                            fs['miller_geo'] = LocalEquilibrium.extract_analytic_geo(fs)
+                            fs['miller_geo'] = LocalEquilibrium.extract_analytic_shape(fs)
                             analytic_timing += time.time()-time1
                         
                         if incl_B:
@@ -568,8 +568,8 @@ class Equilibrium():
                     else:
                         lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
                         derived.update({'rbbbs':lcfs['X'],'zbbbs':lcfs['Y'],'nbbbs':len(lcfs['X'])})
-                    if incl_analytic_geo:
-                        lcfs.update(self.extract_analytic_geo(fs=lcfs))
+                    if analytic_shape:
+                        lcfs.update(LocalEquilibrium.extract_analytic_shape(lcfs))
                 
                     lcfs.update({x_label:x_fs, 'psi':psi_fs, 'q':derived['qpsi'][-1], 'fpol':derived['fpol'][-1]})
                     if x_label != 'rho_tor' and 'rho_tor' in derived:
@@ -625,7 +625,7 @@ class Equilibrium():
                 #derived['beta'] = 8*np.pi*1E-7*derived['pres']/(derived['Bref_eqdsk']**2)
                 #derived['alpha'] = -1*derived['qpsi']**2*derived['Ro']*np.gradient(derived['beta'],derived['r'])
 
-                if incl_analytic_geo:
+                if analytic_shape:
                     derived['miller_geo'] = list_to_array(copy.deepcopy(fluxsurfaces['miller_geo']))
 
                     # compute the shear of the Turnbull-Miller shaping parameters
