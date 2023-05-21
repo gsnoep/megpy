@@ -443,8 +443,8 @@ def contour_extrema(c,tracer_diag='none'):
         c['Y0'] = (Y_max-Y_min)/2
     
     # find the extrema in X of the contour at the midplane
-    c['X_out'] = interpolate.interp1d(Y_out,X_out,bounds_error=False)(c['Y0'])
-    c['X_in'] = interpolate.interp1d(Y_in,X_in,bounds_error=False)(c['Y0'])
+    c['X_out'] = float(interpolate.interp1d(Y_out,X_out,bounds_error=False)(c['Y0']))
+    c['X_in'] = float(interpolate.interp1d(Y_in,X_in,bounds_error=False)(c['Y0']))
 
     # in case level is out of bounds in these interpolations
     if np.isnan(c['X_out']) or np.isinf(c['X_out']):
@@ -511,6 +511,6 @@ def contour_extrema(c,tracer_diag='none'):
         #plt.axis('equal')
         #plt.show()
 
-    c.update({'X_Ymax':X_Ymax,'Y_max':Y_max,'X_Ymin':X_Ymin,'Y_min':Y_min})
+    c.update({'X_Ymax':float(X_Ymax),'Y_max':float(Y_max),'X_Ymin':float(X_Ymin),'Y_min':float(Y_min)})
 
     return c
