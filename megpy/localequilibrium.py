@@ -1,14 +1,5 @@
 """
 created by gsnoep on 11 August 2022, extract_analytic_shape method adapted from 'extract_miller_from_eqdsk.py' by dtold
-
-Module to handle any and all methods related to local magnetic geometry parametrisation.
-
-The LocalEquilibrium Class can:
-- parametrize a set of flux-surface coordinates 
-- extract analytic shape parameters as described by T Luce
-- extract FFT coefficients for Fourier expansion
-- print magnetic geometry input parameters for several microturbulence codes
-
 """
 import numpy as np
 import matplotlib.pyplot as plt
@@ -22,6 +13,12 @@ from sys import stdout
 from .utils import *
 
 class LocalEquilibrium():
+    """Class to handle any and all methods related to local magnetic equilibrium parameterization.
+        - parametrize a set of flux-surface coordinates 
+        - extract analytic shape parameters as described by T Luce
+        - extract FFT coefficients for a Fourier expansion of the local equilibrium
+        - print magnetic geometry input parameters for several microturbulence codes (GENE, TGLF, ...)
+    """
     def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=9,n_theta=7200,n_harmonics=1,analytic_shape=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=True):
         self._params = {'miller':{
                              'param':self.miller,
@@ -82,7 +79,7 @@ class LocalEquilibrium():
                              'param_labels':['R0','Z0','r','kappa','c_0']+[label for sublist in [['c_{}'.format(n),'s_{}'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
                              'deriv_initial':list(np.ones(4+2*n_harmonics)),
                              'deriv_bounds':[-np.inf,np.inf],
-                             'deriv_labels':['dR0dr','dZ0dr','s_kappa','dc_0dr']+[label for sublist in [['dc_{}dr'.format(n),'ds_{}dr'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
+                             'deriv_labels':['dR0dr','dZ0dr','s_kappa','rdc_0dr']+[label for sublist in [['rdc_{}dr'.format(n),'rds_{}dr'.format(n),] for n in range(1,n_harmonics+1)] for label in sublist],
                          }
         }
 
@@ -143,7 +140,7 @@ class LocalEquilibrium():
 
         # optimize the shape parameters
         opt_timing = 0.
-        print('Optimising parametrisation fit of fluxsurfaces...')
+        print('Optimising parameterization fit of fluxsurfaces...')
         for i_x_loc,xfs in enumerate(self.x_grid):
             with np.errstate(divide='ignore',invalid='ignore'):
                 # gather all the flux-surface quantities from the equilibrium
@@ -251,8 +248,8 @@ class LocalEquilibrium():
 
         # interpolate the actual flux-surface contour to the theta basis
         if self._param != 'mxh':
-            self.R_ref = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref))
-            self.Z_ref = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref))
+            self.R_ref = self.eq.fluxsurfaces['fit_geo']['R_ref'][self.x_grid.index(self.x_loc)]
+            self.Z_ref = self.eq.fluxsurfaces['fit_geo']['Z_ref'][self.x_grid.index(self.x_loc)]
         else:
             self.R_ref = self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)]
             self.Z_ref = self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)]
@@ -294,6 +291,7 @@ class LocalEquilibrium():
             self.Bp_ref = self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1]
         self.shape_deriv_ref = copy.deepcopy(self.shape_deriv)
         
+        # add shape_analytic and shape_deriv_analytic for the contour-averaged analytic (Turnbull-)Miller shape parameters
         if analytic_shape:
             print('Computing analytical Miller geometry quantities...')
             self.shape_analytic = []
@@ -323,8 +321,9 @@ class LocalEquilibrium():
             self.Bp_geo = self.param_bpol(self.turnbull_jr,self.shape_analytic, self.shape_deriv_analytic, self.theta, self.R_geo[:-1], self.dpsidr,method='analytic')
             self.Bp_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref_geo[:-1]))
 
+        # optimize shape_derive based on L1 Bpol distance
         if opt_bpol:
-            print('Optimising Bpol parametrisation fit...')
+            print('Optimising Bpol parameterization fit...')
             self.deriv_initial = copy.deepcopy(self.shape_deriv)
 
             self.shape_deriv = least_squares(self.cost_bpol, 
@@ -339,8 +338,9 @@ class LocalEquilibrium():
             for i_key,key in enumerate(self.deriv_labels):
                 self.eq.fluxsurfaces['fit_geo'][key+'_opt'] = copy.deepcopy(self.shape_deriv[i_key])
         
+        # optimize shape_derive based on L1 Bpol, dRdr, dZdr, dRdtheta, dZdtheta distances
         if opt_deriv:
-            print('Optimising derivative parametrisation fits...')
+            print('Optimising derivative parameterization fits...')
             self.deriv_initial = copy.deepcopy(self.shape_deriv)
 
             # compute the reference flux-surface contour gradients on the theta basis
@@ -371,6 +371,18 @@ class LocalEquilibrium():
 
     # local equilibrium Miller parameterizations
     def miller(self,shape,theta,norm=False):
+        """Compute Miller flux-surface parameterization given a set of shape parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Miller shape parameters [R0,Z0,r,kappa,delta].
+            theta (array): 1D array containing the theta-grid.
+            norm (bool, optional): Normalize the parameterized flux-surface coordinates by the center coordinates. Defaults to False.
+
+        Returns:
+            - R_param (array): 1D array containing the radial flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - Z_param (array): 1D array containing the vertical flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - theta_ref (array): 1D array containing the poloidal angle between radial and vertical flux-surface parameterization coordinates sorted ascending.
+        """
         # flux-surface coordinate parameterization from [Miller PoP 5 (1998)] with Z0 added
         [self.R0,self.Z0,r,kappa,delta] = shape
         with np.errstate(invalid='ignore'):
@@ -388,6 +400,23 @@ class LocalEquilibrium():
         return R_param, Z_param, theta_ref
 
     def miller_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        """Compute Miller flux-surface parameterization Jacobian given sets of shape and shape derivative parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Miller shape parameters [R0,Z0,r,kappa,delta].
+            shape_deriv (array): 1D array or list containing the Miller shape derivative parameters [dR0dr,dZ0dr,s_kappa,s_delta].
+            theta (array): 1D array containing the theta-grid.
+            R (array): 1D array containing the radial flux-surface coordinate as output by miller().
+            return_deriv (bool, optional): Switch to return the radial and poloidal derivatives in addition to the Jacobian or not. Defaults to True.
+
+        Returns:
+            dRdtheta (array, optional): 1D array containing the poloidal derivative of the radial flux-surface coordinate.
+            dZdtheta (array, optional): 1D array containing the poloidal derivative of the vertical flux-surface coordinate.
+            dRdr (array, optional): 1D array containing the radial derivative of the radial flux-surface coordinate.
+            dZdr (array, optional): 1D array containing the radial derivative of the vertical flux-surface coordinate.
+            J_r (array): 1D array containing the Jacobian for the Miller parameterization.
+        """
+
         # define the parameters
         [R0,Z0,r,kappa,delta] = shape
         [dR0dr,dZ0dr,s_kappa,s_delta] = shape_deriv
@@ -401,7 +430,7 @@ class LocalEquilibrium():
         dRdr = dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)
         dZdr = dZ0dr + kappa * (s_kappa + 1) * np.sin(theta)
 
-        # compute Mercier-Luc arclength derivative and |grad r|
+        # compute the Jacobian
         J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
 
         if return_deriv:
@@ -410,6 +439,18 @@ class LocalEquilibrium():
             return J_r
 
     def turnbull(self,shape,theta,norm=False):
+        """Compute Turnbull-Miller flux-surface parameterization given a set of shape parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Turnbull-Miller shape parameters [R0,Z0,r,kappa,delta,zeta].
+            theta (array): 1D array containing the theta-grid.
+            norm (bool, optional): Normalize the parameterized flux-surface coordinates by the center coordinates. Defaults to False.
+
+        Returns:
+            - R_param (array): 1D array containing the radial flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - Z_param (array): 1D array containing the vertical flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - theta_ref (array): 1D array containing the poloidal angle between radial and vertical flux-surface parameterization coordinates sorted ascending.
+        """
         # flux-surface coordinate parameterization from [Turnbull PoP 6 (1999)]
         [self.R0,self.Z0,r,kappa,delta,zeta] = shape
         with np.errstate(invalid='ignore'):
@@ -428,6 +469,22 @@ class LocalEquilibrium():
         return R_param, Z_param, theta_ref
 
     def turnbull_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        """Compute Turnbull-Miller flux-surface parameterization Jacobian given sets of shape and shape derivative parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Turnbull-Miller shape parameters [R0,Z0,r,kappa,delta,zeta].
+            shape_deriv (array): 1D array or list containing the Turnbull-Miller shape derivative parameters [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta].
+            theta (array): 1D array containing the theta-grid.
+            R (array): 1D array containing the radial flux-surface coordinate as output by turnbull().
+            return_deriv (bool, optional): Switch to return the radial and poloidal derivatives in addition to the Jacobian or not. Defaults to True.
+
+        Returns:
+            dRdtheta (array, optional): 1D array containing the poloidal derivative of the radial flux-surface coordinate.
+            dZdtheta (array, optional): 1D array containing the poloidal derivative of the vertical flux-surface coordinate.
+            dRdr (array, optional): 1D array containing the radial derivative of the radial flux-surface coordinate.
+            dZdr (array, optional): 1D array containing the radial derivative of the vertical flux-surface coordinate.
+            J_r (array): 1D array containing the Jacobian for the Miller parameterization.
+        """
         # define the parameters
         [R0,Z0,r,kappa,delta,zeta] = shape
         [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta] = shape_deriv
@@ -453,7 +510,19 @@ class LocalEquilibrium():
             return J_r
 
     def turnbull_tilt(self,shape,theta,norm=False):
-        # flux-surface coordinate parameterization from [Turnbull PoP 6 (1999)]
+        """Compute Turnbull-tilt flux-surface parameterization given a set of shape parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Turnbull-tilt shape parameters [R0,Z0,r,kappa,delta,zeta,tilt].
+            theta (array): 1D array containing the theta-grid.
+            norm (bool, optional): Normalize the parameterized flux-surface coordinates by the center coordinates. Defaults to False.
+
+        Returns:
+            - R_param (array): 1D array containing the radial flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - Z_param (array): 1D array containing the vertical flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - theta_ref (array): 1D array containing the poloidal angle between radial and vertical flux-surface parameterization coordinates sorted ascending.
+        """
+        # flux-surface coordinate parameterization based on [Turnbull PoP 6 (1999)] with addition of tilt
         [self.R0,self.Z0,r,kappa,delta,zeta,tilt] = shape
         with np.errstate(invalid='ignore'):
             x = np.arcsin(delta)
@@ -472,6 +541,22 @@ class LocalEquilibrium():
         return R_param, Z_param, theta_ref
 
     def turnbull_tilt_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        """Compute Turnbull-tilt flux-surface parameterization Jacobian given sets of shape and shape derivative parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Turnbull-tilt shape parameters [R0,Z0,r,kappa,delta,zeta,tilt].
+            shape_deriv (array): 1D array or list containing the Turnbull-tilt shape derivative parameters [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta,s_tilt].
+            theta (array): 1D array containing the theta-grid.
+            R (array): 1D array containing the radial flux-surface coordinate as output by turnbull_tilt().
+            return_deriv (bool, optional): Switch to return the radial and poloidal derivatives in addition to the Jacobian or not. Defaults to True.
+
+        Returns:
+            dRdtheta (array, optional): 1D array containing the poloidal derivative of the radial flux-surface coordinate.
+            dZdtheta (array, optional): 1D array containing the poloidal derivative of the vertical flux-surface coordinate.
+            dRdr (array, optional): 1D array containing the radial derivative of the radial flux-surface coordinate.
+            dZdr (array, optional): 1D array containing the radial derivative of the vertical flux-surface coordinate.
+            J_r (array): 1D array containing the Jacobian for the Miller parameterization.
+        """
         # define the parameters
         [R0,Z0,r,kappa,delta,zeta,tilt] = shape
         [dR0dr,dZ0dr,s_kappa,s_delta,s_zeta,s_tilt] = shape_deriv
@@ -498,6 +583,18 @@ class LocalEquilibrium():
 
     # Harmonic expansion method Miller-like parameterizations
     def fourier(self,shape,theta,norm=None):
+        """Compute general Fourier expansion flux-surface parameterization given a set of shape parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Fourier expansion shape parameters [R0,Z0,aR_1,bR_1,aZ_1,bZ_1,...,aR_n,bR_n,aZ_n,bZ_n].
+            theta (array): 1D array containing the theta-grid.
+            norm (bool, optional): Normalize the parameterized flux-surface coordinates by the center coordinates. Defaults to False.
+
+        Returns:
+            - R_param (array): 1D array containing the radial flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - Z_param (array): 1D array containing the vertical flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - theta_ref (array): 1D array containing the poloidal angle between radial and vertical flux-surface parameterization coordinates sorted ascending.
+        """
         # flux-surface coordinate parameterization from [Candy PPCF 51 (2009)]
         [self.R0, self.Z0] = shape[:2] # only difference from [Candy PPCF 51 (2009)], R0 = 0.5*aR_0, Z0 = 0.5*aZ_0
         R_fourier, Z_fourier = 0,0
@@ -522,6 +619,22 @@ class LocalEquilibrium():
         return R_param, Z_param, theta_ref
 
     def fourier_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        """Compute general Fourier expansion flux-surface parameterization Jacobian given sets of shape and shape derivative parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Fourier expansion shape parameters [R0,Z0,aR_1,bR_1,aZ_1,bZ_1,...,aR_n,bR_n,aZ_n,bZ_n].
+            shape_deriv (array): 1D array or list containing the Fourier expansion shape derivative parameters [dR0dr,dZ0dr,daR_1dr,dbR_1dr,daZ_1dr,dbZ_1dr,...,daR_ndr,dbR_ndr,daZ_ndr,dbZ_ndr].
+            theta (array): 1D array containing the theta-grid.
+            R (array): 1D array containing the radial flux-surface coordinate as output by fourier().
+            return_deriv (bool, optional): Switch to return the radial and poloidal derivatives in addition to the Jacobian or not. Defaults to True.
+
+        Returns:
+            dRdtheta (array, optional): 1D array containing the poloidal derivative of the radial flux-surface coordinate.
+            dZdtheta (array, optional): 1D array containing the poloidal derivative of the vertical flux-surface coordinate.
+            dRdr (array, optional): 1D array containing the radial derivative of the radial flux-surface coordinate.
+            dZdr (array, optional): 1D array containing the radial derivative of the vertical flux-surface coordinate.
+            J_r (array): 1D array containing the Jacobian for the Miller parameterization.
+        """
         # flux-surface coordinate parameterization from [Candy PPCF 51 (2009)]
         [dRdr, dZdr] = shape_deriv[:2]
         dRdtheta, dZdtheta = 0,0
@@ -552,6 +665,18 @@ class LocalEquilibrium():
             return J_r
 
     def miller_general(self,shape,theta,norm=False):
+        """Compute GENE miller_general flux-surface parameterization given a set of shape parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the GENE miller_general shape parameters [cN_0,...cN_n,sN_0,...,sN_n].
+            theta (array): 1D array containing the theta-grid.
+            norm (bool, optional): Normalize the parameterized flux-surface coordinates by the center coordinates of the flux-surface of interest. Defaults to False.
+
+        Returns:
+            - R_param (array): 1D array containing the radial flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - Z_param (array): 1D array containing the vertical flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - theta_ref (array): 1D array containing the poloidal angle between radial and vertical flux-surface parameterization coordinates sorted ascending.
+        """
         # Fourier expansion flux-surface coordinate parameterization from GENE
         n_harmonics = int(len(shape)/2)
         # set a fixed R0,Z0 center for the local equilibrium
@@ -577,6 +702,22 @@ class LocalEquilibrium():
         return R_param, Z_param, theta_ref
 
     def miller_general_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        """Compute GENE miller_general flux-surface parameterization Jacobian given sets of shape and shape derivative parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Fourier expansion shape parameters [cN_0,...cN_n,sN_0,...,sN_n].
+            shape_deriv (array): 1D array or list containing the Fourier expansion shape derivative parameters [dcN_0dr,...dcN_ndr,dsN_0dr,...,dsN_ndr].
+            theta (array): 1D array containing the theta-grid.
+            R (array): 1D array containing the radial flux-surface coordinate as output by miller_general().
+            return_deriv (bool, optional): Switch to return the radial and poloidal derivatives in addition to the Jacobian or not. Defaults to True.
+
+        Returns:
+            dRdtheta (array, optional): 1D array containing the poloidal derivative of the radial flux-surface coordinate.
+            dZdtheta (array, optional): 1D array containing the poloidal derivative of the vertical flux-surface coordinate.
+            dRdr (array, optional): 1D array containing the radial derivative of the radial flux-surface coordinate.
+            dZdr (array, optional): 1D array containing the radial derivative of the vertical flux-surface coordinate.
+            J_r (array): 1D array containing the Jacobian for the Miller parameterization.
+        """
         # Fourier expansion flux-surface coordinate parameterization from GENE
         n_harmonics = int(len(shape)/2)
         cN = shape[:n_harmonics]
@@ -606,6 +747,18 @@ class LocalEquilibrium():
             return J_r
 
     def mxh(self,shape,theta,norm=None):
+        """Compute MXH flux-surface parameterization given a set of shape parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the MXH shape parameters [R0,Z0,r,kappa,c_0,c_1,s_1,...,c_n,s_n].
+            theta (array): 1D array containing the theta-grid.
+            norm (bool, optional): Normalize the parameterized flux-surface coordinates by the center coordinates. Defaults to False.
+
+        Returns:
+            - R_param (array): 1D array containing the radial flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - Z_param (array): 1D array containing the vertical flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - theta_ref (array): 1D array containing the poloidal angle between radial and vertical flux-surface parameterization coordinates sorted ascending.
+        """
         # flux-surface coordinate parameterization from [Arbon PPCF 63 (2020)]
         # Compute major radius, elevation, minor radius and elongation from bounding box
         self.R0 = (np.max(self.fs['R'][:-1])+np.min(self.fs['R'][:-1]))/2
@@ -633,6 +786,22 @@ class LocalEquilibrium():
         return R_param, Z_param, theta_ref
      
     def mxh_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        """Compute MXH flux-surface parameterization Jacobian given sets of shape and shape derivative parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the MXH shape parameters [R0,Z0,r,kappa,c_0,c_1,s_1,...,c_n,s_n].
+            shape_deriv (array): 1D array or list containing the MXH shape derivative parameters [dR0dr,dZ0dr,s_kappa,rdc_0dr,rdc_1dr,rds_1dr,...,rdc_ndr,rds_ndr].
+            theta (array): 1D array containing the theta-grid.
+            R (array): 1D array containing the radial flux-surface coordinate as output by mxh().
+            return_deriv (bool, optional): Switch to return the radial and poloidal derivatives in addition to the Jacobian or not. Defaults to True.
+
+        Returns:
+            dRdtheta (array, optional): 1D array containing the poloidal derivative of the radial flux-surface coordinate.
+            dZdtheta (array, optional): 1D array containing the poloidal derivative of the vertical flux-surface coordinate.
+            dRdr (array, optional): 1D array containing the radial derivative of the radial flux-surface coordinate.
+            dZdr (array, optional): 1D array containing the radial derivative of the vertical flux-surface coordinate.
+            J_r (array): 1D array containing the Jacobian for the Miller parameterization.
+        """
         # Compute major radius, elevation, minor radius and elongation from bounding box
         R0 = (np.max(self.fs['R'][:-1])+np.min(self.fs['R'][:-1]))/2
         Z0 = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
@@ -672,6 +841,21 @@ class LocalEquilibrium():
 
     # bpol parameterization
     def param_bpol(self,param_jr,shape,shape_deriv,theta,R,dpsidr,method='jacobian',verbose=True):
+        """Compute Bpol parameterization for a given Jacobian, sets of shape and shape derivative parameters and dpsi/dr on a given theta-grid
+
+        Args:
+            param_jr (array): 1D array containing the param Jacobian on the theta-grid basis.
+            shape (array): 1D array or list containing the param shape parameters.
+            shape_deriv (array): 1D array or list containing the param shape derivative parameters.
+            theta (array): 1D array containing the theta-grid.
+            R (array): 1D array containing the radial flux-surface coordinate as output by param().
+            dpsidr (floar): Float value of dpsi/dr at the flux-surface of interest.
+            method (str, optional): Token setting the Bpol calculation method. For the Miller, Turnbull-Miller and Turnbull-tilt parameterizations an analytic expression for Bpol is available, otherwise default to Jacobian calculation. Defaults to 'jacobian'.
+            verbose (bool, optional): Switch to turn on/off print statements. Defaults to True.
+
+        Returns:
+            array: 1D array containing the parameterized Bpol values on the theta-grid basis. 
+        """
         if method=='analytic':
             if param_jr in [self.miller_jr,self.turnbull_jr,self.turnbull_tilt_jr]:
                 if param_jr==self.miller_jr:
@@ -733,6 +917,14 @@ class LocalEquilibrium():
 
     # cost functions
     def cost_param(self,params):
+        """Compute the cost function f_i(x) for flux-surface coordinates.
+
+        Args:
+            params (array): 1D array or list containing the param shape parameters.
+
+        Returns:
+            array: 1D array containing the weighted sum of squared error cost function with a length of 3*n_theta
+        """
         # compute the flux-surface parameterization for a given shape set `params`
         self.R_param, self.Z_param, self.theta_ref = self.param(params, self.theta, norm=True)
         
@@ -759,6 +951,14 @@ class LocalEquilibrium():
         return cost
 
     def cost_bpol(self,params):
+        """Compute the cost function f_i(x) for flux-surface Bpol.
+
+        Args:
+            params (array): 1D array or list containing the param shape derivative parameters.
+
+        Returns:
+            array: 1D array containing the weighted sum of squared error cost function with a length of n_theta
+        """
         self.Bp_param_opt = self.param_bpol(self.param_jr, self.shape, params, self.theta, self.R_param[:-1], self.dpsidr)
         
         theta_RZ = self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1]
@@ -770,6 +970,14 @@ class LocalEquilibrium():
         return cost
 
     def cost_deriv(self,params):
+        """Compute the cost function f_i(x) for flux-surface coordinate derivatives and Bpol.
+
+        Args:
+            params (array): 1D array or list containing the param shape derivative parameters.
+
+        Returns:
+            array: 1D array containing the weighted sum of squared error cost function with a length of 3*n_theta
+        """
         # compute the flux-surface parameterization derivatives for given shape sets `self.shape` and `params`
         self.dRdtheta, self.dZdtheta, self.dRdr, self.dZdr, self.J_r = self.param_jr(self.shape,params,self.theta,self.R_param[:-1],return_deriv=True)
 
@@ -812,13 +1020,13 @@ class LocalEquilibrium():
         R_miller = fluxsurface['R0'] + fluxsurface['r']*np.cos(fluxsurface['theta_RZ']+x*np.sin(fluxsurface['theta_RZ']))
         Z_miller = np.hstack((interpolate.interp1d(fluxsurface['R'][:np.argmin(fluxsurface['R'])],fluxsurface['Z'][:np.argmin(fluxsurface['R'])],bounds_error=False)(R_miller[:find(np.min(fluxsurface['R']),R_miller)]),interpolate.interp1d(fluxsurface['R'][np.argmin(fluxsurface['R']):],fluxsurface['Z'][np.argmin(fluxsurface['R']):],bounds_error=False)(R_miller[find(np.min(fluxsurface['R']),R_miller):])))
 
-        # derive the squareness (zeta) from the Miller parametrisation
+        # derive the squareness (zeta) from the Miller parameterization
         theta_zeta = np.array([0.25*np.pi,0.75*np.pi,1.25*np.pi,1.75*np.pi])
         Z_zeta = np.zeros_like(theta_zeta)
         for i,quadrant in enumerate(theta_zeta):
             Z_zeta[i] = interpolate.interp1d(fluxsurface['theta_RZ'][find(quadrant-0.25*np.pi,fluxsurface['theta_RZ']):find(quadrant+0.25*np.pi,fluxsurface['theta_RZ'])],Z_miller[find(quadrant-0.25*np.pi,fluxsurface['theta_RZ']):find(quadrant+0.25*np.pi,fluxsurface['theta_RZ'])])(quadrant)
 
-        # invert the Miller parametrisation of Z, holding off on subtracting theta/sin(2*theta)
+        # invert the Miller parameterization of Z, holding off on subtracting theta/sin(2*theta)
         zeta_4q = np.arcsin((Z_zeta-fluxsurface['Z0'])/(miller_geo['kappa']*fluxsurface['r']))/np.sin(2*theta_zeta)
 
         # apply a periodic correction for the arcsin of the flux-surface quadrants
@@ -838,7 +1046,19 @@ class LocalEquilibrium():
         return miller_geo
 
     def extract_fft_shape(self,fluxsurface,R0,Z0,theta,n_harmonics):
+        """Extract Fourier coefficients from a flux-surface contour from a truncated FFT.
 
+        Args:
+            fluxsurface (dict): Dict containing containing R, Z, R0, Z0, r, theta_RZ (poloidal angle between R and Z) and the R_Zmax,Z_max and R_Zmin,Z_min coordinates of a flux-surface.
+            R0 (float): Float value of the flux-surface center radial coordinate.
+            Z0 (float): Float value of the flux-surface center vertical coordinate.
+            theta (array): 1D array containing the theta-grid.
+            n_harmonics (int): Integer value of the number of harmonics at which to truncate the FFT.
+
+        Returns:
+            - cN (array): 1D array containing the cos() Fourier coefficients.
+            - sN (array): 1D array containing the sin() Fourier coefficients.
+        """
         R_r = fluxsurface['R']
         Z_r = fluxsurface['Z']
         theta_RZ = fluxsurface['theta_RZ']
@@ -860,15 +1080,25 @@ class LocalEquilibrium():
         return cN, sN
 
     # auxiliary functions
-    def printer(self,printer,shape,labels,shape_bpol,labels_bpol,lref='a'):
+    def printer(self,printer,shape,labels,shape_deriv,labels_deriv,lref='a'):
+        """Print magnetic geometry related input values for gyrokinetic codes.
+
+        Args:
+            printer (str): String token specifying which code format values are to be printed in.
+            shape (array): 1D array or list containing the param shape parameters.
+            labels (list): list of str labels of shape labels for parameterized flux-surface.
+            shape_deriv (array): 1D array or list containing the param shape derivative parameters.
+            labels_deriv (list): list of str labels of shape derivative labels for parameterized Bpol.
+            lref (str, optional): String token specifying the reference length used to normalize the output. Defaults to 'a'.
+        """
         print('Printing input values for {} code...'.format(printer))
         i_x_loc = self.x_grid.index(self.x_loc)
 
         fs = {}
         for i_key,key in enumerate(labels):
             fs.update({key:shape[i_key]})
-        for i_key,key in enumerate(labels_bpol):
-            fs.update({key:shape_bpol[i_key]})
+        for i_key,key in enumerate(labels_deriv):
+            fs.update({key:shape_deriv[i_key]})
         # get the other derived quantities required for print
         for key in ['q','s','fpol']:
             if key in self.eq.fluxsurfaces:
@@ -947,7 +1177,13 @@ class LocalEquilibrium():
 
         return
 
-    def plot_all(self,incl_analytic=None,opt_bpol=None):
+    def plot_all(self,analytic_shape=None,opt_bpol=None):
+        """Plot a summury of a magnetic equilibrium and local parameterization.
+
+        Args:
+            analytic_shape (bool,optional): Bool to include contour-averaged analytical shape parameters in the plots.
+            opt_bpol (bool,optional): Bool to include optimized shape derivative parameters in the plots.
+        """
         i_x_loc = self.x_grid.index(self.x_loc)
 
         fs = {}
