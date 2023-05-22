@@ -565,11 +565,22 @@ class Equilibrium():
                     if 'rbbbs' in raw and 'zbbbs' in raw:
                         # find the geometric center, minor radius and extrema of the lcfs manually
                         lcfs = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
+                        keys = copy.deepcopy(list(lcfs.keys()))
+                        for key in keys:
+                            if 'X' in key or 'Y' in key:
+                                _key = (key.replace('X','R')).replace('Y','Z')
+                                lcfs[_key] = lcfs.pop(key)
+                        lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
                     else:
                         lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
+                        keys = copy.deepcopy(list(lcfs.keys()))
+                        for key in keys:
+                            if 'X' in key or 'Y' in key:
+                                _key = (key.replace('X','R')).replace('Y','Z')
+                                lcfs[_key] = lcfs.pop(key)
                         derived.update({'rbbbs':lcfs['X'],'zbbbs':lcfs['Y'],'nbbbs':len(lcfs['X'])})
                     if analytic_shape:
-                        lcfs.update(LocalEquilibrium.extract_analytic_shape(lcfs))
+                        lcfs.update({'miller_geo':LocalEquilibrium.extract_analytic_shape(lcfs)})
                 
                     lcfs.update({x_label:x_fs, 'psi':psi_fs, 'q':derived['qpsi'][-1], 'fpol':derived['fpol'][-1]})
                     if x_label != 'rho_tor' and 'rho_tor' in derived:
@@ -581,9 +592,10 @@ class Equilibrium():
                             lcfs[_key] = lcfs.pop(key)
                     del lcfs['label']
                     del lcfs['level']
+                    # append the lcfs values to the end of the flux surface data
                     merge_trees(lcfs,fluxsurfaces)
 
-                    # add a zero at the start of all flux surface quantities and append the lcfs values to the end of the flux surface data
+                    # add a zero at the start of all flux surface quantities
                     for key in fluxsurfaces:
                         if key in ['R','R0','R_Zmax','R_Zmin','R_in','R_out']:
                             fluxsurfaces[key].insert(0,derived['rmaxis'])
@@ -592,7 +604,11 @@ class Equilibrium():
                         elif key in ['kappa','delta','zeta','s_kappa','s_delta','s_zeta']:
                             fluxsurfaces[key].insert(0,fluxsurfaces[key][0])
                         else:
-                            fluxsurfaces[key].insert(0,0.*fluxsurfaces[key][-1])
+                            if isinstance(fluxsurfaces[key],dict):
+                                for _key in fluxsurfaces[key]:
+                                    fluxsurfaces[key][_key].insert(0,0.*fluxsurfaces[key][_key][-1])
+                            elif isinstance(fluxsurfaces[key],list):
+                                fluxsurfaces[key].insert(0,0.*fluxsurfaces[key][-1])
 
                 # add the midplane average geometric flux surface quantities to derived
                 derived['Ro'] = np.array(fluxsurfaces['R0'])
