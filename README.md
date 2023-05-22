@@ -3,13 +3,7 @@ MEGPy is a package for quick **extraction of (local) equilibrium quantities** an
 It offers both a command line interface (CLI) and Python API.
 
 # Getting started
-To use MEGPy install it with pip:
-
-```bash
-$ pip install --user megpy
-```
-
-Or to compile the latest version directly from source:
+To use MEGPy clone and install the latest version:
 ```bash
 $ git clone git@github.com:gsnoep/megpy.git
 $ cd megpy
