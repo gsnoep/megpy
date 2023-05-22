@@ -19,10 +19,10 @@ $ pip install --user -e .
 Join the repository to contribute or raise issues!
 
 # Supported equilibrium formats
-- EQDSK (CHEASE, EFIT, ESCO, CHEASE, LIUQE)
+- EQDSK [(g-file)](https://w3.pppl.gov/ntcc/TORAY/G_EQDSK.pdf) from EFIT, ESCO, CHEASE or LIUQE
 
 To be added:
-- IDS
+- IMAS equilibrium IDS
 
 # Supported flux surface geometries
 - Miller [(doi)](https://doi.org/10.1063/1.872666)
