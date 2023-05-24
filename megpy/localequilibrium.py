@@ -1022,9 +1022,7 @@ class LocalEquilibrium():
 
         # derive the squareness (zeta) from the Miller parameterization
         theta_zeta = np.array([0.25*np.pi,0.75*np.pi,1.25*np.pi,1.75*np.pi])
-        Z_zeta = np.zeros_like(theta_zeta)
-        for i,quadrant in enumerate(theta_zeta):
-            Z_zeta[i] = interpolate.interp1d(fluxsurface['theta_RZ'][find(quadrant-0.25*np.pi,fluxsurface['theta_RZ']):find(quadrant+0.25*np.pi,fluxsurface['theta_RZ'])],Z_miller[find(quadrant-0.25*np.pi,fluxsurface['theta_RZ']):find(quadrant+0.25*np.pi,fluxsurface['theta_RZ'])])(quadrant)
+        Z_zeta = interpolate.interp1d(fluxsurface['theta_RZ'],Z_miller,bounds_error=False,fill_value='extrapolate')(theta_zeta)
 
         # invert the Miller parameterization of Z, holding off on subtracting theta/sin(2*theta)
         zeta_4q = np.arcsin((Z_zeta-fluxsurface['Z0'])/(miller_geo['kappa']*fluxsurface['r']))/np.sin(2*theta_zeta)
