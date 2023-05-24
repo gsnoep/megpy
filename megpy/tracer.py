@@ -37,7 +37,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
         else:
             i_xcenter = int(len(X)/2)
             i_ycenter = int(len(Y)/2)
-        
+
         center = Z[i_ycenter,i_xcenter]
 
         # find the vertical extrema of the threshold contour at the xcenter
@@ -136,10 +136,10 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
                     elif interp_method == 'bounded_extrapolation':
                         ZX_slice_top_left = ZX_slice_top_left[ZX_slice_top_left<=threshold]
                         ZX_slice_top_right = ZX_slice_top_right[ZX_slice_top_right<=threshold]
-                        
+
                         X_top_left = float(interpolate.interp1d(ZX_slice_top_left,X[i_ZX_slice_split-len(ZX_slice_top_left):i_ZX_slice_split][ZX_slice_top_left<=threshold],bounds_error=False,fill_value='extrapolate')(level))
                         X_top_right = float(interpolate.interp1d(ZX_slice_top_right,X[i_ZX_slice_split:i_ZX_slice_split+len(ZX_slice_top_right)][ZX_slice_top_right<=threshold],bounds_error=False,fill_value='extrapolate')(level))
-                    
+
                     # diagnostic plot to check interpolation issues for rows
                     if tracer_diag == 'interp':
                         plt.figure()
@@ -148,7 +148,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
                         plt.plot(ZX_slice_top_right,X[i_ZX_slice_split:i_ZX_slice_split+len(ZX_slice_top_right)],'r-',label='right, top')
                         plt.axvline(level,ls='dashed',color='black')
                         plt.legend()
-                    
+
                     # insert the coordinate pairs into the contour trace dict if not nan (bounds error) and order properly for merging later
                     if not np.isnan(X_top_left):
                         XY_contour['left']['top'].append((X_top_left,Y[i]))
@@ -160,11 +160,11 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
                             X_max = X_top_right
                 except:
                     pass
-            
+
             # update the slice coordinates
             if i < Z.shape[0]-1:
                 i+=1
-            
+
         # while the level intersects with the current Z slice gather the intersection coordinates
         while (eval('level' + f_sgn + 'f_threshold(Z[:,k])') and k < Z.shape[1]-1):
             if X[k] <= X_max:
@@ -190,7 +190,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
 
                         Y_bottom_right = float(interpolate.interp1d(ZY_slice_bottom_right,Y_slice_bottom_right,bounds_error=False,fill_value='extrapolate')(level))
                         Y_top_right = float(interpolate.interp1d(ZY_slice_top_right,Y_slice_top_right,bounds_error=False,fill_value='extrapolate')(level))
-                    
+
                     # diagnostic plot to check interpolation issues for columns
                     if tracer_diag == 'interp':
                         plt.figure()
@@ -237,7 +237,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
                         ZX_slice_bottom_right = ZX_slice_bottom_right[ZX_slice_bottom_right<=threshold]
                         X_bottom_left = float(interpolate.interp1d(ZX_slice_bottom_left,X[j_ZX_slice_split-len(ZX_slice_bottom_left):j_ZX_slice_split][ZX_slice_bottom_left<=threshold],bounds_error=False,fill_value='extrapolate')(level))
                         X_bottom_right = float(interpolate.interp1d(ZX_slice_bottom_right,X[j_ZX_slice_split:j_ZX_slice_split+len(ZX_slice_bottom_right)][ZX_slice_bottom_right<=threshold],bounds_error=False,fill_value='extrapolate')(level))
-                    
+
                     # diagnostic plot to check interpolation issues for rows
                     if tracer_diag == 'interp':
                         plt.figure()
@@ -260,7 +260,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
             # update the slice coordinates
             if j > 0:
                 j-=1
-                
+
         # while the level intersects with the current Z slice gather the intersection coordinates
         while (eval('level' + f_sgn + 'f_threshold(Z[:,l])') and l > 0):
             # interpolate the X coordinate of the bottom half of the contour on both the right and left
@@ -287,7 +287,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
 
                         Y_bottom_left = float(interpolate.interp1d(ZY_slice_bottom_left,Y_slice_bottom_left,bounds_error=False,fill_value='extrapolate')(level))
                         Y_top_left = float(interpolate.interp1d(ZY_slice_top_left,Y_slice_top_left,bounds_error=False,fill_value='extrapolate')(level))
-                    
+
                     # diagnostic plot to check interpolation issues for columns
                     if tracer_diag == 'interp':
                         plt.figure()
@@ -318,7 +318,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
         XY_contour = sorted(XY_contour['right']['top']+XY_contour['left']['top']+XY_contour['left']['bottom']+XY_contour['right']['bottom'])
         #print(XY_contour)
         XY_contour = list(dict.fromkeys(XY_contour))
-        
+
         try:
             # find the extrema of the traced coordinates
             Y_X_min = min(XY_contour) # coordinates for min(X)
@@ -354,7 +354,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
             Y_ = np.array([y for x,y in XY_contour])
 
             contour_ = {'X':X_,'Y':Y_,'level':level}
-            
+
             # diagnostic plot for checking the complete contour trace, e.g. in combination with the contour extrema fitting
             if tracer_diag == 'contour':
                 #plt.figure()
@@ -379,7 +379,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
             # zipsort the contour from 0 - 2 pi
             contour_['theta_XY'] = arctan2pi(contour_['Y']-contour_['Y0'],contour_['X']-contour_['X0'])
             contour_['theta_XY'], contour_['X'], contour_['Y'] = zipsort(contour_['theta_XY'], contour_['X'], contour_['Y'])
-            
+
             # close the contour
             contour_['theta_XY'] = np.append(contour_['theta_XY'],contour_['theta_XY'][0])
             contour_['X'] = np.append(contour_['X'],contour_['X'][0])
@@ -441,7 +441,7 @@ def contour_extrema(c,tracer_diag='none'):
     # check if the midplane of the contour is provided
     if 'Y0' not in c:
         c['Y0'] = (Y_max-Y_min)/2
-    
+
     # find the extrema in X of the contour at the midplane
     c['X_out'] = float(interpolate.interp1d(Y_out,X_out,bounds_error=False)(c['Y0']))
     c['X_in'] = float(interpolate.interp1d(Y_in,X_in,bounds_error=False)(c['Y0']))
@@ -475,7 +475,7 @@ def contour_extrema(c,tracer_diag='none'):
         for i in range(i_Y_max-3,i_Y_max+4):
             if c['Y'][i] >= (np.min(c['Y'])+np.max(c['Y']))/2:
                 max_filter[i] = True
-    
+
     if np.array(min_filter).sum() < 7:
         for i in range(i_Y_min-3,i_Y_min+4):
             if c['Y'][i] <= (np.min(c['Y'])+np.max(c['Y']))/2:
