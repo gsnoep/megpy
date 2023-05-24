@@ -486,6 +486,16 @@ class Equilibrium():
                         x_list = self.derived['psi'][1:]
                 else:
                     x_list = list(x)
+                
+                threshold = derived['sibry']
+                interp_method = 'normal'
+                if np.max(psirz[np.where(psirz!=0.0)]) <= threshold:
+                    threshold = np.max(psirz[np.where(psirz!=0.0)])
+                    interp_method = 'bounded_extrapolation'
+                elif np.min(psirz[np.where(psirz!=0.0)]) >= threshold:
+                    threshold = np.min(psirz[np.where(psirz!=0.0)])
+                    interp_method = 'bounded_extrapolation'
+                print(threshold,derived['sibry'])
 
                 tracer_timing = 0.
                 analytic_timing = 0.
@@ -502,7 +512,7 @@ class Equilibrium():
                         
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
-                        fs = tracer.contour(R,Z,psirz,psi_fs,derived['sibry'],i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag)
+                        fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
                         tracer_timing += time.time()-time0
                         fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
                         if x_label != 'rho_tor' and 'rho_tor' in derived:
