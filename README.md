@@ -3,12 +3,22 @@ MEGPy is a package for quick **extraction of (local) equilibrium quantities** an
 It offers both a command line interface (CLI) and Python API.
 
 # Getting started
-To use MEGPy clone and install the latest version:
+To get MEGPy clone and install the latest version:
 ```bash
 $ git clone git@github.com:gsnoep/megpy.git
 $ cd megpy
 $ pip install --user -e .
 ```
+
+To use MEGPy call the CLI:
+```bash
+$ python -m megpy <file_path> <parameterization> <x_fs>
+```
+For details on the CLI options:
+```bash
+$ python -m -h
+```
+Or use the Python API, of which some examples can be found in /examples/.
 
 Join the repository to contribute or raise issues!
 
@@ -18,7 +28,7 @@ Join the repository to contribute or raise issues!
 To be added:
 - IMAS equilibrium IDS
 
-# Supported flux surface geometries
+# Supported flux-surface geometries
 - Miller [(doi)](https://doi.org/10.1063/1.872666)
 - Turnbull-Miller [(doi)](https://doi.org/10.1063/1.873380)
 - Fourier / generalised Miller [(doi)](https://doi.org/10.1088/0741-3335/51/10/105009)
