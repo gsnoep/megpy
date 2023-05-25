@@ -24,7 +24,7 @@ def str2bool(v):
 def parse():
     parser = argparse.ArgumentParser(description='MEGPy: Extract flux surface shaping parameters (Miller, Turnbull-Miller, etc) from EQDSK files.')
     parser.add_argument(dest='file', type=is_valid_file, help='valid path to an EQDSK file', metavar='FILE')
-    parser.add_argument(dest='method', type=str, default='turnbull', help='parameterization to be used for fitting the flux surfaces and Bpol', metavar='STR')
+    parser.add_argument(dest='method', type=str, default='turnbull', help='parameterization to be used for fitting the flux surfaces and Bpol', metavar='PARAM')
     parser.add_argument(dest='x_fs', type=float, help='radial location to extract flux surface and Bpol shaping parameters', metavar='POSITION')
     parser.add_argument('-x', '--x_label', dest='x_label', required=False, type=str, default='rho_tor', help='label of the radial location (e.g. rho_tor, rho_pol, r/a)', metavar='STR')
     parser.add_argument('-r', '--refine', dest='refine', required=False, type=int, default=0, help='refine the poloidal flux map psi(R,Z) <r> times', metavar='INT')
