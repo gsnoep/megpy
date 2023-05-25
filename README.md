@@ -16,7 +16,7 @@ $ python -m megpy <file_path> <parameterization> <x_fs>
 ```
 For details on the CLI options:
 ```bash
-$ python -m -h
+$ python -m megpy -h
 ```
 Or use the Python API, of which some examples can be found in /examples/.
 
