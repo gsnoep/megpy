@@ -495,7 +495,6 @@ class Equilibrium():
                 elif np.min(psirz[np.where(psirz!=0.0)]) >= threshold:
                     threshold = np.min(psirz[np.where(psirz!=0.0)])
                     interp_method = 'bounded_extrapolation'
-                print(threshold,derived['sibry'])
 
                 tracer_timing = 0.
                 analytic_timing = 0.
