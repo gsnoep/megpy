@@ -1,7 +1,7 @@
 """
-Utilities
-A collection of general numerical or Python utilities useful across the framework
+created by gsnoep on 11 August 2022
 
+A collection of general numerical or Python utilities useful across the package
 """
 
 import numpy as np
@@ -252,6 +252,12 @@ def array_to_list(object):
     return object
 
 def merge_trees(source,target):
+    """Merge two dictionaries, key by key append values to the target dictionary.
+
+    Args:
+        source (dict): dict containing key,value pairs to be appended.
+        target (dict): dict to append the values to.
+    """
     if isinstance(source,dict) and isinstance(target,dict):
         for key in source.keys():
             if key not in target.keys():
@@ -269,6 +275,16 @@ def merge_trees(source,target):
                 target.update({key:[]})
 
 def zipsort(theta,x,y):
+    """Sort two coordinates x,y as function of the polar angle theta between them.
+
+    Args:
+        theta (array): array containing polar angles.
+        x (array): array containing x-coordinates.
+        y (array): array containing y-coordinates.
+
+    Returns:
+        theta_sorted (array), x_sorted (array), y_sorted (array): Tuple of sorted arrays.
+    """
     if not isinstance(theta,np.ndarray):
         theta = np.array(theta)
     # sort 2D coordinates x,y by their polar angle theta to ensure theta_param=[0,2pi]
