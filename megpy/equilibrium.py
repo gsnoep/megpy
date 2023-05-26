@@ -280,6 +280,7 @@ class Equilibrium():
         return
 
     def read_json(self,path='./',fname='Equilibrium.json'):
+        print("Reading Equilibrium {}".format(path+fname))
         with open(path+fname,'r') as file:
             equilibrium_json = json.load(file)
         
