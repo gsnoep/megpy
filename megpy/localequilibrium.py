@@ -187,10 +187,6 @@ class LocalEquilibrium():
                     if self._param == 'miller_general':
                         self.param_initial = list(cN)+list(sN)
 
-                #self.R_geo, self.Z_geo, self.theta_ref_geo = self.param(self.param_initial, np.append(self.theta,self.theta[0]), norm=False)
-                #self.R_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['R'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
-                #self.Z_ref_geo = np.array(interpolate.interp1d(self.fs['theta_RZ'], self.fs['Z'], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
-
                 time0 = time.time()
                 # compute the optimized shape parameters
                 self.params = least_squares(self.cost_param, 
@@ -205,11 +201,11 @@ class LocalEquilibrium():
                 #print('Optimization time pp:{}'.format(opt_timing))
 
                 # add the final parameterized and interpolated 
-                params_keys = ['theta', 'R_param', 'Z_param', 'theta_ref', 'R_ref', 'Z_ref']#,'R_ref_geo', 'Z_ref_geo']
+                params_keys = ['theta', 'R_param', 'Z_param', 'theta_ref', 'R_ref', 'Z_ref']
                 if self._param in ['mxh']:
-                    params_values = [self.theta, self.R_param+self.fs['R0'], self.Z_param+self.fs['Z0'], self.theta_ref, self.R_ref+self.fs['R0'], self.Z_ref+self.fs['Z0']]#, self.R_ref_geo, self.Z_ref_geo]
+                    params_values = [self.theta, self.R_param+self.fs['R0'], self.Z_param+self.fs['Z0'], self.theta_ref, self.R_ref+self.fs['R0'], self.Z_ref+self.fs['Z0']]
                 else:
-                    params_values = [self.theta, self.R_param+self.params[0], self.Z_param+self.params[1], self.theta_ref, self.R_ref+self.params[0], self.Z_ref+self.params[1]]#, self.R_ref_geo, self.Z_ref_geo]
+                    params_values = [self.theta, self.R_param+self.params[0], self.Z_param+self.params[1], self.theta_ref, self.R_ref+self.params[0], self.Z_ref+self.params[1]]
                 
                 for i_key,key in enumerate(params_keys):
                     self.fs.update({key:copy.deepcopy(params_values[i_key])})
@@ -242,6 +238,8 @@ class LocalEquilibrium():
         # re-set the LocalEquilibrium state variables to the x_loc values
         self.fs['R'] = self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)]
         self.fs['Z'] = self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)]
+        if self.verbose:
+            print('Number of points on reference flux-surface: {}'.format(len(self.fs['R'])))
         self.theta = copy.deepcopy(self.eq.fluxsurfaces['fit_geo']['theta'][self.x_grid.index(self.x_loc)])
         self.R_param, self.Z_param, self.theta_ref = self.param(self.shape, np.append(self.theta,self.theta[0]), norm=False)
         self.Bt_param = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_param[:-1])
@@ -249,7 +247,9 @@ class LocalEquilibrium():
         # interpolate the actual flux-surface contour to the theta basis
         if self._param != 'mxh':
             self.R_ref = self.eq.fluxsurfaces['fit_geo']['R_ref'][self.x_grid.index(self.x_loc)]
+            self.R_ref = np.append(self.R_ref,self.R_ref[0])
             self.Z_ref = self.eq.fluxsurfaces['fit_geo']['Z_ref'][self.x_grid.index(self.x_loc)]
+            self.Z_ref = np.append(self.Z_ref,self.Z_ref[0])
         else:
             self.R_ref = self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)]
             self.Z_ref = self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)]
