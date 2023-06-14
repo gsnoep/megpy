@@ -36,7 +36,7 @@ To be added:
 
 # Citation
 If you use MEGPy in your research, please cite [(bibtex)](https://github.com/gsnoep/megpy/blob/main/citation.bib):
->G. Snoep, J.T.W. Koenders, C. Bourdelle, J. Citrin and JET contributors, "Improved flux-surface parameterization through constrained nonlinear optimization," Physics of Plasmas, TBP (2023)
+>G. Snoep, J.T.W. Koenders, C. Bourdelle, J. Citrin and JET contributors, "Improved flux-surface parameterization through constrained nonlinear optimization," _Physics of Plasmas_ **30**, 063906 (2023)
 
 
                     .#&%%%-.
