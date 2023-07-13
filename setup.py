@@ -12,6 +12,7 @@ setup(
     packages=find_packages(),
     package_dir={'megpy':'megpy'},
     install_requires = ['numpy', 'scipy'],
+    setup_requires = ['setuptools >= 38.3.0']
     entry_points = {
         'console_scripts': ['megpy=megpy.cli: parse'],
     },
