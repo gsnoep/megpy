@@ -11,7 +11,7 @@ setup(
     long_description=long_description,
     long_description_content_type = 'text/markdown',
     url='https://www.github.com/gsnoep/megpy',
-    author='Garud Snoep',
+    author='Garud Snoep, Aaron Ho',
     classifiers=['Programming Language :: Python :: 3', 
                 'Operating System :: OS Independent'],
     keywords='fusion simulation toolkit',
