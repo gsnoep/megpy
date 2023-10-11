@@ -1141,6 +1141,59 @@ class LocalEquilibrium():
                 print('Bref    = {}'.format(np.abs(fs['fpol']/fs['R0'])))
                 print('Bunit    = {}'.format(np.abs(self.Bunit)))
                 print('Bunit/Bref    = {}'.format(np.abs(self.Bunit/(fs['fpol']/fs['R0']))))
+                print('a*drho_tor/dr    = {} !for gradient coversion omn(rho_tor) -> a/Ln'.format(self.eq.derived['a']*self.dxdr[i_x_loc]))
+                print('R0*drho_tor/dr    = {} !for gradient coversion omn(rho_tor) -> R0/Ln'.format(fs['R0']*self.dxdr[i_x_loc]))
+                print('/')
+            
+            elif self._param in ['mxh']:
+                cN_m = []
+                cNdr_m = []
+                sN_m = [0.0]
+                sNdr_m = [0.0]
+                for label in self.param_labels:
+                    if 'c_' in label:
+                        cN_m.append(fs[label])
+                    elif 's_' in label:
+                        sN_m.append(fs[label])
+                for label in self.deriv_labels:
+                    if 'rdc_' in label:
+                        cNdr_m.append(fs[label])
+                    elif 'rds_' in label:
+                        sNdr_m.append(fs[label])
+
+                print('&geometry')
+                print('trpeps  = {}\t! {} = {}'.format((fs['r']/fs['R0']),self.x_label,self.x_loc))
+                print('q0      = {}'.format(fs['q']))
+                print('shat    = {}'.format(fs['s']))
+                print('amhd    = {}'.format(-1))
+                print('drR     = {}'.format(fs['dR0dr']))
+                print('drZ     = {}'.format(fs['dZ0dr']))
+                print('kappa   = {}'.format(fs['kappa']))
+                print('s_kappa = {}'.format(fs['s_kappa']))
+                print('cN_m  = {}'.format(' '.join('{:15.8e}'.format(value) for value in cN_m)))
+                print('cNdr_m  = {}'.format(' '.join('{:15.8e}'.format(value) for value in cNdr_m)))
+                print('sN_m  = {}'.format(' '.join('{:15.8e}'.format(value) for value in sN_m)))
+                print('sNdr_m  = {}'.format(' '.join('{:15.8e}'.format(value) for value in sNdr_m)))
+                print('minor_r = {}'.format(self.eq.derived['a']/Lref))#1.0,
+                print('major_R = {}'.format(fs['R0']/Lref))#R0/a,
+                print('/')
+            
+                print('\nAdditional information:')
+                print('delta   = {:15.8e}'.format(np.sin(sN_m[1])))
+                print('s_delta = {:15.8e}'.format(sNdr_m[1]))
+                print('zeta    = {:15.8e}'.format(-sN_m[2]))
+                print('s_zeta  = {:15.8e}'.format(-sNdr_m[2]))
+                print('')
+                print('&units')
+                if lref == 'a':
+                    print('Lref    = {} !for Lref=a convention'.format(Lref))
+                elif lref == 'R':
+                    print('Lref    = {} !for Lref=R0 convention'.format(fs['R0']))
+                print('Bref    = {}'.format(np.abs(fs['fpol']/fs['R0'])))
+                print('Bunit    = {}'.format(np.abs(self.Bunit)))
+                print('Bunit/Bref    = {}'.format(np.abs(self.Bunit/(fs['fpol']/fs['R0']))))
+                print('a*drho_tor/dr    = {} !for gradient coversion omn(rho_tor) -> a/Ln'.format(self.eq.derived['a']*self.dxdr[i_x_loc]))
+                print('R0*drho_tor/dr    = {} !for gradient coversion omn(rho_tor) -> R0/Ln'.format(fs['R0']*self.dxdr[i_x_loc]))
                 print('/')
 
             else:
