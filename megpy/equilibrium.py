@@ -355,8 +355,8 @@ class Equilibrium():
         if 'rbbbs' in raw and 'zbbbs' in derived:
             # ensure the boundary coordinates are stored from midplane lfs to midplane hfs
             i_split = find(np.max(derived['rbbbs']),self.derived['rbbbs'])
-            derived['rbbbs'] = np.hstack((derived['rbbbs'][i_split:],derived['rbbbs'][:i_split]))
-            derived['zbbbs'] = np.hstack((derived['zbbbs'][i_split:],derived['zbbbs'][:i_split]))
+            derived['rbbbs'] = np.hstack((derived['rbbbs'][i_split:],derived['rbbbs'][:i_split],derived['rbbbs'][i_split]))
+            derived['zbbbs'] = np.hstack((derived['zbbbs'][i_split:],derived['zbbbs'][:i_split],derived['zbbbs'][i_split]))
             
             # find the indexes of 'zmaxis' on the high field side (hfs) and low field side (lfs) of the separatrix
             i_zmaxis_hfs = int(len(derived['zbbbs'])/3)+find(derived['zmaxis'],derived['zbbbs'][int(len(derived['zbbbs'])/3):int(2*len(derived['zbbbs'])/3)])
