@@ -27,7 +27,7 @@ def parse():
     parser.add_argument(dest='method', type=str, default='turnbull', help='parameterization to be used for fitting the flux surfaces and Bpol', metavar='PARAM')
     parser.add_argument(dest='x_fs', type=float, help='radial location to extract flux surface and Bpol shaping parameters', metavar='POSITION')
     parser.add_argument('-x', '--x_label', dest='x_label', required=False, type=str, default='rho_tor', help='label of the radial location (e.g. rho_tor, rho_pol, r/a)', metavar='STR')
-    parser.add_argument('-r', '--refine', dest='refine', required=False, type=int, default=0, help='refine the poloidal flux map psi(R,Z) <r> times', metavar='INT')
+    parser.add_argument('-r', '--refine', dest='refine', required=False, type=int, default=1, help='refine the poloidal flux map psi(R,Z) <r> times', metavar='INT')
     parser.add_argument('--n_x', dest='n_x', required=False, type=int, default=9, help='number of radial points used for radial derivatives', metavar='INT')
     parser.add_argument('--n_theta', dest='n_theta', required=False, type=int, default=7200, help='number of poloidal grid points', metavar='INT')
     parser.add_argument('--n_harmonics', dest='n_harmonics', required=False, type=int, default=3, help='number of harmonics used in the optimization for fourier/miller_general/mxh', metavar='INT')
