@@ -341,6 +341,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
                 plt.plot(*zip(*sorted(XY_right_bottom)),'.-',label='right, Bottom')
                 plt.plot(*zip(*sorted(XY_left_bottom)),'.-',label='left, Bottom')
                 plt.plot(*zip(*XY_contour))
+                plt.axis('scaled')
                 plt.legend()
                 plt.xlabel('X [m]')
                 plt.ylabel('Y [m]')
@@ -364,6 +365,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
                 plt.axis('scaled')
                 plt.xlabel('X [m]')
                 plt.ylabel('Y [m]')
+                plt.show()
 
             if symmetrise:
                 R_sym = (contour_['X']+contour_['X'][::-1])/2
