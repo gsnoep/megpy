@@ -294,8 +294,16 @@ class LocalEquilibrium():
         # add shape_analytic and shape_deriv_analytic for the contour-averaged analytic (Turnbull-)Miller shape parameters
         if analytic_shape:
             print('Computing analytical Miller geometry quantities...')
+            if self._param in ['miller','turnbull']:
+                label_analytic = self._param
+                param_analytic = self.param
+                jr_analytic = self.param_jr
+            else:
+                label_analytic = 'turnbull'
+                param_analytic = self.turnbull
+                jr_analytic = self.turnbull_jr
             self.shape_analytic = []
-            for key in self._params['turnbull']['param_labels']:
+            for key in self._params[label_analytic]['param_labels']:
                 if '0' in key:
                     key = key.replace('0','o')
                 if key in self.eq.derived:
@@ -303,7 +311,7 @@ class LocalEquilibrium():
                 elif key in self.eq.derived['miller_geo']:
                     self.shape_analytic.append(self.eq.derived['miller_geo'][key][self.x_grid.index(self.x_loc)])
             self.shape_deriv_analytic = []
-            for key in self._params['turnbull']['deriv_labels']:
+            for key in self._params[label_analytic]['deriv_labels']:
                 if '0' in key:
                     key = key.replace('0','o')
                 if key in self.eq.derived:
@@ -311,14 +319,14 @@ class LocalEquilibrium():
                 elif key in self.eq.derived['miller_geo']:
                     self.shape_deriv_analytic.append(self.eq.derived['miller_geo'][key][self.x_grid.index(self.x_loc)])
                         
-            self.R_geo, self.Z_geo, self.theta_ref_geo = self.turnbull(self.shape_analytic, np.append(self.theta,self.theta[0]), norm=False)
+            self.R_geo, self.Z_geo, self.theta_ref_geo = param_analytic(self.shape_analytic, np.append(self.theta,self.theta[0]), norm=False)
             self.Bt_geo = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_geo[:-1])
 
             self.R_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
             self.Z_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
             self.Bt_ref_geo  = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_ref_geo[:-1])
 
-            self.Bp_geo = self.param_bpol(self.turnbull_jr,self.shape_analytic, self.shape_deriv_analytic, self.theta, self.R_geo[:-1], self.dpsidr,method='analytic')
+            self.Bp_geo = self.param_bpol(jr_analytic,self.shape_analytic, self.shape_deriv_analytic, self.theta, self.R_geo[:-1], self.dpsidr)#,method='analytic')
             self.Bp_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref_geo[:-1]))
 
         # optimize shape_derive based on L1 Bpol distance
@@ -865,10 +873,11 @@ class LocalEquilibrium():
                     with np.errstate(invalid='ignore'):
                         x = np.arcsin(delta)
                     theta_R = theta + x * np.sin(theta)
+                    dtheta_Rdtheta = 1 + x * np.cos(theta)
                     
-                    Bp_nom = np.sqrt(np.sin(theta_R)**2 + (1 + x * np.cos(theta))**2 + kappa**2 * np.cos(theta)**2)
-                    Bp_denom = kappa * (np.cos(x * np.sin(theta)) + dR0dr * np.cos(theta) + (s_kappa - s_delta * np.cos(theta) + (1+ s_kappa) * x * np.cos(theta)) * np.sin(theta) * np.sin(theta_R))
-                
+                    Bp_nom = np.sqrt(np.sin(theta_R)**2 * dtheta_Rdtheta**2 + kappa**2 * np.cos(theta)**2)
+                    Bp_denom = kappa * (np.cos(x * np.sin(theta)) + dR0dr * np.cos(theta) + (dZ0dr/kappa)*(np.sin(theta_R)*dtheta_Rdtheta) + (s_kappa - s_delta * np.cos(theta) + (1+ s_kappa) * x * np.cos(theta)) * np.sin(theta) * np.sin(theta_R))
+
                 elif param_jr == self.turnbull_jr:
                     # define the parameters
                     [R0,Z0,r,kappa,delta,zeta] = shape
