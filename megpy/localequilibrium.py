@@ -19,7 +19,7 @@ class LocalEquilibrium():
         - extract FFT coefficients for a Fourier expansion of the local equilibrium
         - print magnetic geometry input parameters for several microturbulence codes (GENE, TGLF, ...)
     """
-    def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=9,n_theta=7200,n_harmonics=1,analytic_shape=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=True):
+    def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=9,n_theta='default',n_harmonics=1,analytic_shape=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=True):
         self._params = {'miller':{
                              'param':self.miller,
                              'param_jr':self.miller_jr,
@@ -126,7 +126,6 @@ class LocalEquilibrium():
         self.eq.fluxsurfaces['fit_geo'] = {}
 
         # generate the poloidal grid
-        self.n_theta = n_theta
         theta_min = 0
         theta_max = 2*np.pi
         for theta in self.eq.fluxsurfaces['theta_RZ']:
@@ -134,9 +133,13 @@ class LocalEquilibrium():
                 theta_min = np.min(theta)
             if np.max(theta) < theta_max:
                 theta_max = np.max(theta)
-        self.theta = np.linspace(theta_min,theta_max,self.n_theta)
-        if self._param == 'miller_general':
-            self.theta = np.linspace(0,2,self.n_theta)*np.pi
+        if isinstance(n_theta,int):
+            self.n_theta = n_theta
+            self.theta = np.linspace(theta_min,theta_max,self.n_theta)
+            if self._param == 'miller_general':
+                self.theta = np.linspace(0,2,self.n_theta)*np.pi
+        elif not (isinstance(n_theta,int) or isinstance(n_theta,str)):
+            raise ValueError('Invalid n_theta input!')
 
         # optimize the shape parameters
         opt_timing = 0.
@@ -154,6 +157,14 @@ class LocalEquilibrium():
                     for key in self.eq.fluxsurfaces['miller_geo']:
                         quantity = copy.deepcopy(self.eq.fluxsurfaces['miller_geo'][key][i_x_loc])
                         self.fs['miller_geo'].update({key:quantity})
+                # set the default n_theta (interpolating only once in between the traced flux-surface grid points)
+                if n_theta == 'default':
+                    self.n_theta = 2 * len(self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)])
+                    self.theta = np.linspace(theta_min,theta_max,self.n_theta)
+                    if self._param == 'miller_general':
+                        self.theta = np.linspace(0,2,self.n_theta)*np.pi
+
+                # modifications for MXH and Fourier
                 if self._param == 'mxh':
                     self.fs['R0'] = (np.max(self.fs['R'][:-1])+np.min(self.fs['R'][:-1]))/2
                     self.fs['Z0'] = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
@@ -171,6 +182,8 @@ class LocalEquilibrium():
                                                    n_harmonics)
                     for i_key,key in enumerate(self.param_labels):
                         self.fs.update({key:copy.deepcopy((list(cN)+list(sN))[i_key])})
+                
+                # array-ify the flux-surface data
                 list_to_array(self.fs)
 
                 # set the initial shape condition for the optimization routine
@@ -234,6 +247,8 @@ class LocalEquilibrium():
         list_to_array(self.eq.fluxsurfaces['fit_geo'])
         opt_timing /= len(self.x_grid)
         print('Optimization time pp:{}'.format(opt_timing))
+
+        # TODO: add relative error output verbosity
 
         # re-set the LocalEquilibrium state variables to the x_loc values
         self.fs['R'] = self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)]
