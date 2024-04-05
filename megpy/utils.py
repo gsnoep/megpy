@@ -7,6 +7,7 @@ A collection of general numerical or Python utilities useful across the package
 import numpy as np
 import os
 import copy
+import pickle
 from scipy import interpolate
 
 def number(x):
@@ -317,3 +318,12 @@ def interpolate_periodic(x_in,y_in,x_out):
     # interpolate to [0,2*pi]
     y_out = interpolate.interp1d(x_extended,y_extended,bounds_error=False,kind='slinear')(x_out)
     return y_out
+
+def read_pickle(f_path):
+    try:
+        with open(f_path, 'rb') as file:
+            data = pickle.load(file)
+        return data
+    except (pickle.UnpicklingError, FileNotFoundError) as error:
+        print("Error loading pickle file:", error)
+        return None
