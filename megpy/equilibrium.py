@@ -77,7 +77,6 @@ class Equilibrium():
         # check if eqdsk file path is provided and if it exists
         if f_path is None or not os.path.isfile(f_path):
             raise ValueError('Invalid file or path provided!')
-            return
         
         # read the g-file
         with open(f_path,'r') as file:
@@ -303,6 +302,82 @@ class Equilibrium():
 
         return
 
+    def read_ex2gk_pkl(self,f_path,use_fitted=False,add_derived=False):
+        """Read an EX2GK pickle file containing eqdsk g-file data into `Equilibrium` object
+
+        Args:
+            f_path (str): the path to the EX2GK pickle file, including the file name (!).
+            use_fitted (bool, optional): use GPR fitted pressure, pprime and q profiles. Defaults to False.
+            add_derived (bool, optional): add derived quantities. Defaults to False.
+
+        Raises:
+            ValueError: invalid file path provided
+        """
+        # check if eqdsk file path is provided and if it exists
+        if f_path is None or (isinstance(f_path,str) and not os.path.isfile(f_path)):
+            raise ValueError('Invalid file path provided!')
+        
+        # get the eqdsk keys from the g-file format
+        eqdsk_keys = []
+        for key in self._eqdsk_format.keys():
+            if isinstance(self._eqdsk_format[key]['vars'],list):
+                eqdsk_keys += self._eqdsk_format[key]['vars']
+        
+        # read the EX2GK data pickle
+        ex2gk_data = read_pickle(f_path)
+
+        # TODO: verify that the required variables are present in ex2gk data
+
+        # collect and collate all the required eqdsk data from ex2gk_data
+        ex2gk_eqdsk = {'case':'EX2GK #'+str(ex2gk_data['META_SHOT'])+', '+ex2gk_data['ED_PPROV'],
+                       'idum':42,
+                       'nw':ex2gk_data['ED_PSI'].shape[1],
+                       'nh':ex2gk_data['ED_PSI'].shape[0],
+                       'rdim':np.nanmax(ex2gk_data['ED_PSIX']) - np.nanmin(ex2gk_data['ED_PSIX']),
+                       'zdim':np.nanmax(ex2gk_data['ED_PSIY']) - np.nanmin(ex2gk_data['ED_PSIY']),
+                       'rcentr':ex2gk_data['ZD_RVAC'],
+                       'rleft':np.nanmin(ex2gk_data['ED_PSIX']),
+                       'zmid':(np.nanmax(ex2gk_data['ED_PSIY']) + np.nanmin(ex2gk_data['ED_PSIY'])) / 2.0,
+                       'rmaxis':ex2gk_data['ZD_RMAG'],
+                       'zmaxis':ex2gk_data['ZD_ZMAG'],
+                       'simag':ex2gk_data['ZD_PSIAXS'],
+                       'sibry':ex2gk_data['ZD_PSIBND'],
+                       'bcentr':ex2gk_data['ZD_BVAC'],
+                       'current':ex2gk_data['ZD_IPLA'],
+                       'fpol':ex2gk_data['ED_F'],
+                       'pres':ex2gk_data['ED_P'],
+                       'ffprim':ex2gk_data['ED_FFP'],
+                       'pprime':ex2gk_data['ED_PP'],
+                       'psirz':ex2gk_data['ED_PSI'],
+                       'qpsi':ex2gk_data['ED_Q'],}
+
+        # check if boundary definition is present
+        if 'ED_BND' in ex2gk_data:
+            ex2gk_eqdsk.update({'nbbbs':len(ex2gk_data['ED_BND']),
+                                'rbbbs':ex2gk_data['ED_BND'],
+                                'zbbbs':ex2gk_data['ED_BNDX']})
+        if 'ED_LIM' in ex2gk_data:
+            ex2gk_eqdsk.update({'limitr':len(ex2gk_data['ED_LIM']),
+                                'rlim':ex2gk_data['ED_LIM'],
+                                'zlim':ex2gk_data['ED_LIMX'],})
+
+        # optional: use the GPR fitted pressure, pprime and q profiles instead of the eqdsk values
+        if use_fitted:
+            ex2gk_eqdsk.update({'pres':ex2gk_data['PD_PEI'],
+                                'pprime':ex2gk_data['PD_DPEI'],
+                                'qpsi':ex2gk_data['PD_Q'],})
+        
+        # insert the eqdsk data from EX2GK into raw
+        for key in eqdsk_keys:
+            if key in ex2gk_eqdsk:
+                self.raw.update({key:ex2gk_eqdsk[key]})
+
+        # optional: add derived quantities
+        if add_derived:
+            self.add_derived()
+
+        return
+
     ## physics functions
     def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,tracer_diag=None):
         """Add quantities derived from the raw `Equilibrium.read_geqdsk()` output, such as phi, rho_pol, rho_tor to the `Equilibrium` object.
@@ -349,7 +424,7 @@ class Equilibrium():
         derived['psi'] = np.linspace(derived['simag'],derived['sibry'],derived['nw'])
 
         # corresponding rho_pol grid
-        psi_norm = (derived['psi'] - derived['simag'])/(derived['sibry'] - derived['simag'])
+        psi_norm = np.abs((derived['psi'] - derived['simag'])/(derived['sibry'] - derived['simag']))
         derived['rho_pol'] = np.sqrt(psi_norm)
 
         if 'rbbbs' in raw and 'zbbbs' in derived:
@@ -397,7 +472,7 @@ class Equilibrium():
         derived['rho_tor']  = np.sqrt(phi_norm)
 
         # compute the rho_pol and rho_tor grids corresponding to the R,Z grid
-        psirz_norm = abs(derived['psirz'] - derived['simag'])/(derived['sibry'] - derived['simag'])
+        psirz_norm = np.abs((derived['psirz'] - derived['simag'])/(derived['sibry'] - derived['simag']))
         derived['rhorz_pol'] = np.sqrt(psirz_norm)
 
         derived['phirz'] = interpolate.interp1d(derived['psi'],derived['phi'],kind=5,bounds_error=False)(derived['psirz'])
