@@ -128,11 +128,6 @@ class LocalEquilibrium():
         # generate the poloidal grid
         theta_min = 0
         theta_max = 2*np.pi
-        for theta in self.eq.fluxsurfaces['theta_RZ']:
-            if np.min(theta) > theta_min:
-                theta_min = np.min(theta)
-            if np.max(theta) < theta_max:
-                theta_max = np.max(theta)
         if isinstance(n_theta,int):
             self.n_theta = n_theta
             self.theta = np.linspace(theta_min,theta_max,self.n_theta)
@@ -251,8 +246,8 @@ class LocalEquilibrium():
         # TODO: add relative error output verbosity
 
         # re-set the LocalEquilibrium state variables to the x_loc values
-        self.fs['R'] = self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)]
-        self.fs['Z'] = self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)]
+        self.fs['R'] = copy.deepcopy(self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)])
+        self.fs['Z'] = copy.deepcopy(self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)])
         if self.verbose:
             print('Number of points on reference flux-surface: {}'.format(len(self.fs['R'])))
         self.theta = copy.deepcopy(self.eq.fluxsurfaces['fit_geo']['theta'][self.x_grid.index(self.x_loc)])
@@ -956,15 +951,10 @@ class LocalEquilibrium():
         if self._param in ['mxh']:
             self.R_ref = self.fs['R'][:-1] - self.R0
             self.Z_ref = self.fs['Z'][:-1] - self.Z0
-        # TODO: merge the two conditionals below when unifying all interpolation to interpolate_periodic/spline interpolation
-        elif self._param == 'miller_general':
+        else:
             # interpolate the actual flux-surface contour to the theta basis 
             self.R_ref = np.array(interpolate_periodic(self.fs['theta_RZ'][:-1], self.fs['R'][:-1],self.theta_ref)) - self.R0
             self.Z_ref = np.array(interpolate_periodic(self.fs['theta_RZ'][:-1], self.fs['Z'][:-1],self.theta_ref)) - self.Z0
-        else:
-            # interpolate the actual flux-surface contour to the theta basis 
-            self.R_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'][:-1], self.fs['R'][:-1], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - self.R0
-            self.Z_ref = np.array(interpolate.interp1d(self.fs['theta_RZ'][:-1], self.fs['Z'][:-1], bounds_error=False, fill_value='extrapolate')(self.theta_ref)) - self.Z0
 
         # define the cost function
         L1_norm = np.abs(np.array([self.R_param,self.Z_param])-np.array([self.R_ref,self.Z_ref])).flatten()
