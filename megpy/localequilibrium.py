@@ -197,14 +197,15 @@ class LocalEquilibrium():
 
                 time0 = time.time()
                 # compute the optimized shape parameters
-                self.params = least_squares(self.cost_param, 
+                self.lsq = least_squares(self.cost_param, 
                                             self.param_initial, 
                                             bounds=self.param_bounds, 
                                             ftol=self.tolerance, 
                                             xtol=self.tolerance, 
                                             gtol=self.tolerance, 
                                             loss='soft_l1', 
-                                            verbose=diag_lsq)['x']
+                                            verbose=diag_lsq)
+                self.params = self.lsq['x']
                 opt_timing += time.time()-time0
                 #print('Optimization time pp:{}'.format(opt_timing))
 
@@ -267,7 +268,7 @@ class LocalEquilibrium():
 
         # compute the self-consistent shape derivative parameters
         self.dxdr = np.gradient(self.eq.fluxsurfaces[x_label],self.eq.fluxsurfaces['fit_geo']['r'],edge_order=2)
-        self.dpsidr = (self.dxdr*np.gradient(self.eq.fluxsurfaces['psi'],np.array(self.eq.fluxsurfaces[x_label])))[self.x_grid.index(self.x_loc)]
+        self.dpsidr = np.abs(self.dxdr*np.gradient(self.eq.fluxsurfaces['psi'],np.array(self.eq.fluxsurfaces[x_label])))[self.x_grid.index(self.x_loc)]
         self.Bunit = (self.eq.fluxsurfaces['q']/self.eq.fluxsurfaces['fit_geo']['r'])[self.x_grid.index(self.x_loc)]*self.dpsidr
 
         self.shape_deriv = []
