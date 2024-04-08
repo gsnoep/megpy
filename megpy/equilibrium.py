@@ -313,6 +313,7 @@ class Equilibrium():
         Raises:
             ValueError: invalid file path provided
         """
+        print('Reading EX2GK equilibrium information to Equilibrium...')
         # check if eqdsk file path is provided and if it exists
         if f_path is None or (isinstance(f_path,str) and not os.path.isfile(f_path)):
             raise ValueError('Invalid file path provided!')
