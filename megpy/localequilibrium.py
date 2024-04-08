@@ -240,13 +240,11 @@ class LocalEquilibrium():
                     stdout.flush()
         
         list_to_array(self.eq.fluxsurfaces['fit_geo'])
-        opt_timing /= len(self.x_grid)
         
         if self.verbose:
             stdout.write('\n')
-            print('Optimization time pp:{}'.format(opt_timing))
-
-        # TODO: add relative error output verbosity
+            print('Optimization time:{:.3f}s / flux-surface'.format(opt_timing/len(self.x_grid)))
+            print('Total fitting time:{:.3f}s'.format(opt_timing))
 
         # re-set the LocalEquilibrium state variables to the x_loc values
         self.fs['R'] = copy.deepcopy(self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)])
