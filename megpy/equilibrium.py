@@ -34,7 +34,7 @@ class Equilibrium():
     """
     Class to handle any and all data related to the magnetic equilibrium in a magnetic confinement fusion device.
     """
-    def __init__(self):
+    def __init__(self,verbose=True):
         self.raw = {} # storage for all raw eqdsk data
         self.derived = {} # storage for all data derived from eqdsk data
         self.fluxsurfaces = {} # storage for all data related to flux surfaces
@@ -57,6 +57,7 @@ class Equilibrium():
         }
         self._sanity_values = ['rmaxis','zmaxis','simag','sibry'] # specify the sanity values used for consistency check of eqdsk file
         self._max_values = 5 # maximum number of values per line
+        self.verbose = verbose
 
     ## I/O functions
     def read_geqdsk(self,f_path=None,add_derived=False):
@@ -72,7 +73,8 @@ class Equilibrium():
         Raises:
             ValueError: Raise an exception when no `f_path` is provided
         """
-        print('Reading eqdsk g-file to Equilibrium...')
+        if self.verbose:
+            print('Reading eqdsk g-file to Equilibrium...')
 
         # check if eqdsk file path is provided and if it exists
         if f_path is None or not os.path.isfile(f_path):
@@ -177,7 +179,8 @@ class Equilibrium():
         Returns:
             
         """
-        print('Writing Equilibrium to eqdsk g-file...')
+        if self.verbose:
+            print('Writing Equilibrium to eqdsk g-file...')
 
         if self.raw:
             if not isinstance(f_path, str):
@@ -279,7 +282,8 @@ class Equilibrium():
         return
 
     def read_json(self,path='./',fname='Equilibrium.json'):
-        print("Reading Equilibrium {}".format(path+fname))
+        if self.verbose:
+            print("Reading Equilibrium {}".format(path+fname))
         with open(path+fname,'r') as file:
             equilibrium_json = json.load(file)
         
@@ -298,7 +302,8 @@ class Equilibrium():
         array_to_list(equilibrium)
         json.dump(equilibrium, codecs.open(path+fname, 'w', encoding='utf-8'), separators=(',', ':'), indent=4)
 
-        print('Generated megpy.Equilibrium file at: {}'.format(path+fname))
+        if self.verbose:
+            print('Generated megpy.Equilibrium file at: {}'.format(path+fname))
 
         return
 
@@ -313,7 +318,8 @@ class Equilibrium():
         Raises:
             ValueError: invalid file path provided
         """
-        print('Reading EX2GK equilibrium information to Equilibrium...')
+        if self.verbose:
+            print('Reading EX2GK equilibrium information to Equilibrium...')
         # check if eqdsk file path is provided and if it exists
         if f_path is None or (isinstance(f_path,str) and not os.path.isfile(f_path)):
             raise ValueError('Invalid file path provided!')
@@ -380,7 +386,7 @@ class Equilibrium():
         return
 
     ## physics functions
-    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,tracer_diag=None):
+    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,tracer_diag=None,verbose=False):
         """Add quantities derived from the raw `Equilibrium.read_geqdsk()` output, such as phi, rho_pol, rho_tor to the `Equilibrium` object.
         Can also be called directly if `f_path` is defined.
 
@@ -397,8 +403,8 @@ class Equilibrium():
         Raises:
             ValueError: Raises an exception when `Equilibrium.raw` is empty and no `f_path` is provided
         """
-
-        print('Adding derived quantities to Equilibrium...')
+        if self.verbose or verbose:
+            print('Adding derived quantities to Equilibrium...')
 
         if self.raw == {}:
             try:
@@ -513,7 +519,8 @@ class Equilibrium():
         Returns:
             self.
         """
-        print('Adding fluxsurfaces to Equilibrium...')
+        if self.verbose or verbose:
+            print('Adding fluxsurfaces to Equilibrium...')
 
         # check if self.fluxsurfaces contains all the flux surfaces specified by derived['rho_tor'] already
         if self.fluxsurfaces and self.derived and len(self.fluxsurfaces['rho_tor']) == len(self.derived['rho_tor']):
@@ -577,8 +584,9 @@ class Equilibrium():
                 analytic_timing = 0.
                 for i_x_fs,x_fs in enumerate(x_list):
                     # print a progress %
-                    stdout.write('\r {}% completed'.format(round(100*(find(x_fs,x_list)+1)/len(x_list))))
-                    stdout.flush()
+                    if self.verbose or verbose:
+                        stdout.write('\r {}% completed'.format(round(100*(find(x_fs,x_list)+1)/len(x_list))))
+                        stdout.flush()
                     # check that rho stays inside the lcfs
                     if x_fs > 0 and x_fs < 0.999:
                         # compute the psi level of the flux surface
@@ -638,12 +646,14 @@ class Equilibrium():
 
                         # merge the flux surface data into the Equilibrium()
                         merge_trees(fs,fluxsurfaces)
-                stdout.write('\n')
                 analytic_timing /= len(x_list)
                 tracer_timing /= len(x_list)
 
-                print('tracer time pp:{}'.format(tracer_timing))
-                print('analytic extraction time pp:{}'.format(analytic_timing))
+                if verbose:
+                    stdout.write('\n')
+                    print('tracer time:{:.3f}s / flux-surface'.format(tracer_timing))
+                    print('analytic extraction time:{:.3f}s / flux-surface'.format(analytic_timing))
+                
                 if tracer_diag == 'fs':
                     plt.show()
 
@@ -760,7 +770,7 @@ class Equilibrium():
         
         return self.derived[x_label],y_interpolated
     
-    def refine_equilibrium(self,nw=None,nh=None,nbbbs=None,interp_order=9,verbose=True):
+    def refine_equilibrium(self,nw=None,nh=None,nbbbs=None,interp_order=9,verbose=False):
         """Refine the R,Z refine of the `Equilibrium` through interpolation, assuming a g-EQDSK file as origin.
 
         Args:
