@@ -65,7 +65,8 @@ def arctan2pi(y,x):
         # calculate the angle
         theta = np.arctan2(y,x)
         # fix the arctan asymptote jump
-        theta[find(-np.pi,theta):] += 2*np.pi
+        for ind in np.flatnonzero(np.abs(np.diff(theta)) > np.pi):
+            theta[ind+1:] += -1*np.sign(np.diff(theta)[ind])*2*np.pi
         # make sure the resulting angle array is between 0 and 2 pi
         theta[theta<0.] += 2*np.pi
         theta[theta>2*np.pi] -= 2*np.pi
