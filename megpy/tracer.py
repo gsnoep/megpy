@@ -404,6 +404,11 @@ def contour_center(c,tracer_diag='none'):
             (dict): the contour with the extrema information added
         """
 
+        # close the contour if not closed
+        if c['X'][-1] != c['X'][0] or c['Y'][-1] != c['Y'][0]:
+            c['X'] = np.append(c['X'],c['X'][0])
+            c['Y'] = np.append(c['Y'],c['Y'][0])
+
         # find the average elevation (midplane) of the contour by computing the vertical centroid [Candy PPCF 51 (2009) 105009]
         c['Y0'] = integrate.trapz(c['X']*c['Y'],c['Y'])/integrate.trapz(c['X'],c['Y'])
 
@@ -442,7 +447,7 @@ def contour_extrema(c,tracer_diag='none'):
 
     # check if the midplane of the contour is provided
     if 'Y0' not in c:
-        c['Y0'] = (Y_max-Y_min)/2
+        c['Y0'] = Y_min+((Y_max-Y_min)/2)
 
     # find the extrema in X of the contour at the midplane
     c['X_out'] = float(interpolate.interp1d(Y_out,X_out,bounds_error=False)(c['Y0']))
