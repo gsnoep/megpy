@@ -138,7 +138,8 @@ class LocalEquilibrium():
 
         # optimize the shape parameters
         opt_timing = 0.
-        print('Optimising parameterization fit of fluxsurfaces...')
+        if self.verbose:
+            print('Optimising parameterization fit of fluxsurfaces...')
         for i_x_loc,xfs in enumerate(self.x_grid):
             with np.errstate(divide='ignore',invalid='ignore'):
                 # gather all the flux-surface quantities from the equilibrium
@@ -190,7 +191,7 @@ class LocalEquilibrium():
                     for i_key,key in enumerate(self.param_labels):
                         if key in self.fs:
                             self.param_initial[i_key] = copy.deepcopy(self.fs[key])
-                        elif key in self.fs['miller_geo']:
+                        elif ('miller_geo' in self.fs) and (key in self.fs['miller_geo']):
                             self.param_initial[i_key] = copy.deepcopy(self.fs['miller_geo'][key])
                     if self._param == 'miller_general':
                         self.param_initial = list(cN)+list(sN)
@@ -227,10 +228,9 @@ class LocalEquilibrium():
                 for i_key, key in enumerate(self.param_labels):
                     self.fs.update({key:self.params[i_key]})
                 
-                del self.fs['R']
-                del self.fs['Z']
-                del self.fs['theta_RZ']
-                del self.fs['miller_geo']
+                for key in ['R','Z','theta_RZ','miller_geo']:
+                    if key in self.fs:
+                        del self.fs[key]
 
                 merge_trees(self.fs,self.eq.fluxsurfaces['fit_geo'])
 
@@ -238,11 +238,13 @@ class LocalEquilibrium():
                     # print a progress %
                     stdout.write('\r {}% completed'.format(round(100*(find(xfs,self.x_grid)+1)/len(self.x_grid))))
                     stdout.flush()
-        if self.verbose:
-            stdout.write('\n')
+        
         list_to_array(self.eq.fluxsurfaces['fit_geo'])
         opt_timing /= len(self.x_grid)
-        print('Optimization time pp:{}'.format(opt_timing))
+        
+        if self.verbose:
+            stdout.write('\n')
+            print('Optimization time pp:{}'.format(opt_timing))
 
         # TODO: add relative error output verbosity
 
@@ -304,7 +306,8 @@ class LocalEquilibrium():
         
         # add shape_analytic and shape_deriv_analytic for the contour-averaged analytic (Turnbull-)Miller shape parameters
         if analytic_shape:
-            print('Computing analytical Miller geometry quantities...')
+            if self.verbose:
+                print('Computing analytical Miller geometry quantities...')
             if self._param in ['miller','turnbull']:
                 label_analytic = self._param
                 param_analytic = self.param
