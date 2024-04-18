@@ -385,6 +385,85 @@ class Equilibrium():
 
         return
 
+    def read_ids_equilibrium(self,f_path=None,add_derived=False):
+
+        if self.verbose:
+            print('Reading equilibrium IDS (HDF5) information to Equilibrium...')
+        # check if ids file path is provided and if it exists
+        if f_path is None or (isinstance(f_path,str) and not os.path.isfile(f_path)):
+            raise ValueError('Invalid file path provided!')
+
+        # get the eqdsk keys from the g-file format
+        eqdsk_keys = []
+        for key in self._eqdsk_format.keys():
+            if isinstance(self._eqdsk_format[key]['vars'],list):
+                eqdsk_keys += self._eqdsk_format[key]['vars']
+
+        ids_data = read_hdf5(f_path)
+
+        ids_eqdsk = {}
+        if 'equilibrium' in ids_data:
+
+            cocos_factor = 2.0 * np.pi   # IDS uses COCOS=11 convention, G-EQDSK has no convention (?) but EX2GK uses COCOS=1
+            ids_eq_data = ids_data['equilibrium']
+
+            rgrid = ids_eq_data['time_slice[]&profiles_2d[]&grid&dim1'][-1,0]
+            zgrid = ids_eq_data['time_slice[]&profiles_2d[]&grid&dim2'][-1,0]
+            ids_eqdsk.update({
+                'nw': len(rgrid),
+                'nh': len(zgrid),
+                'rdim': np.nanmax(rgrid) - np.nanmin(rgrid),
+                'zdim': np.nanmax(zgrid) - np.nanmin(zgrid),
+                'rcentr': ids_eq_data['vacuum_toroidal_field&r0'][()],
+                'rleft': np.nanmin(rgrid),
+                'zmid': (np.nanmax(zgrid) + np.nanmin(zgrid)) / 2.0,
+                'rmaxis': ids_eq_data['time_slice[]&global_quantities&magnetic_axis&r'][-1],
+                'zmaxis': ids_eq_data['time_slice[]&global_quantities&magnetic_axis&z'][-1],
+                'simag': ids_eq_data['time_slice[]&global_quantities&psi_axis'][-1] / cocos_factor,
+                'sibry': ids_eq_data['time_slice[]&global_quantities&psi_boundary'][-1] / cocos_factor,
+                'bcentr': ids_eq_data['vacuum_toroidal_field&b0'][()],
+                'current': ids_eq_data['time_slice[]&global_quantities&ip'][-1],
+                'fpol': ids_eq_data['time_slice[]&profiles_1d&f'][-1],
+                'pres': ids_eq_data['time_slice[]&profiles_1d&pressure'][-1],
+                'ffprim': ids_eq_data['time_slice[]&profiles_1d&f_df_dpsi'][-1] * cocos_factor,
+                'pprim': ids_eq_data['time_slice[]&profiles_1d&dpressure_dpsi'][-1] * cocos_factor,
+                'psirz': ids_eq_data['time_slice[]&profiles_2d[]&psi'][-1,0] / cocos_factor,
+                'qpsi': ids_eq_data['time_slice[]&profiles_1d&q'][-1],
+            })
+
+            # check if boundary definition is present
+            if 'time_slice[]&boundary&x_point[]&AOS_SHAPE' in ids_eq_data and ids_eq_data['time_slice[]&boundary&x_point[]&AOS_SHAPE'][-1,0] > 0:
+                nbnd = len(ids_eq_data['time_slice[]&boundary&outline&r'][-1])
+                ids_eqdsk.update({
+                    'rbbbs': ids_eq_data['time_slice[]&boundary&outline&r'][-1],
+                    'zbbbs': ids_eq_data['time_slice[]&boundary&outline&z'][-1],
+                    'nbbbs': nbnd,
+                })
+            else:
+                nlim = len(ids_eq_data['time_slice[]&boundary&outline&r'][-1])
+                ids_eqdsk.update({
+                    'rlim': ids_eq_data['time_slice[]&boundary&outline&r'][-1],
+                    'zlim': ids_eq_data['time_slice[]&boundary&outline&z'][-1],
+                    'limitr': nlim,
+                })
+ 
+        # insert the eqdsk data from IDS into raw
+        for key in eqdsk_keys:
+            if key in ids_eqdsk:
+                self.raw.update({key:ids_eqdsk[key]})
+
+        # optional: add derived quantities
+        if add_derived:
+            self.add_derived()
+
+        return
+
+    @classmethod
+    def from_ids_equilibrium(cls,f_path=None,add_derived=False,verbose=False):
+        out = cls(verbose=verbose)
+        out.read_ids_equilibrium(f_path=f_path,add_derived=add_derived)
+        return out
+
     ## physics functions
     def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,tracer_diag=None,verbose=False):
         """Add quantities derived from the raw `Equilibrium.read_geqdsk()` output, such as phi, rho_pol, rho_tor to the `Equilibrium` object.

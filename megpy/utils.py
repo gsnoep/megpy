@@ -8,6 +8,7 @@ import numpy as np
 import os
 import copy
 import pickle
+import h5py
 from scipy import interpolate
 
 def number(x):
@@ -327,4 +328,12 @@ def read_pickle(f_path):
         return data
     except (pickle.UnpicklingError, FileNotFoundError) as error:
         print("Error loading pickle file:", error)
+        return None
+
+def read_hdf5(f_path):
+    try:
+        data = h5py.File(f_path, 'r')
+        return data
+    except (OSError, FileNotFoundError) as error:
+        print("Error loading HDF5 file:", error)
         return None
