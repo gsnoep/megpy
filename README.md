@@ -24,9 +24,11 @@ Join the repository to contribute or raise issues!
 
 # Supported equilibrium formats
 - EQDSK [(g-file)](https://w3.pppl.gov/ntcc/TORAY/G_EQDSK.pdf) from EFIT, ESCO, CHEASE or LIUQE
+- [EX2GK](https://gitlab.com/aaronkho/EX2GK) pickle file
+- IMAS equilibrium IDS
 
 To be added:
-- IMAS equilibrium IDS
+- VMEC
 
 # Supported flux-surface geometries
 - Miller [(doi)](https://doi.org/10.1063/1.872666)
