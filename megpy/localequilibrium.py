@@ -198,7 +198,7 @@ class LocalEquilibrium():
 
                 time0 = time.time()
                 # compute the optimized shape parameters
-                self.lsq = least_squares(self.cost_param, 
+                lsq = least_squares(self.cost_param, 
                                             self.param_initial, 
                                             bounds=self.param_bounds, 
                                             ftol=self.tolerance, 
@@ -206,7 +206,7 @@ class LocalEquilibrium():
                                             gtol=self.tolerance, 
                                             loss='soft_l1', 
                                             verbose=diag_lsq)
-                self.params = self.lsq['x']
+                self.params = lsq['x']
                 opt_timing += time.time()-time0
                 #print('Optimization time pp:{}'.format(opt_timing))
 
@@ -223,6 +223,7 @@ class LocalEquilibrium():
                 # if the current flux-surface is the one at self.x_loc, set the shape parameters
                 if xfs == self.x_loc:
                     self.shape = copy.deepcopy(self.params)
+                    self.lsq = copy.deepcopy(lsq)
 
                 # label and add the optimized shape parameters to the flux-surface dict
                 for i_key, key in enumerate(self.param_labels):
@@ -252,8 +253,16 @@ class LocalEquilibrium():
         if self.verbose:
             print('Number of points on reference flux-surface: {}'.format(len(self.fs['R'])))
         self.theta = copy.deepcopy(self.eq.fluxsurfaces['fit_geo']['theta'][self.x_grid.index(self.x_loc)])
+        self.n_theta = len(self.theta)
         self.R_param, self.Z_param, self.theta_ref = self.param(self.shape, np.append(self.theta,self.theta[0]), norm=False)
         self.Bt_param = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_param[:-1])
+
+        # compute the Hessian estimate from the least squares fit Jacobian
+        H = self.lsq['jac'].T @ self.lsq['jac']
+        H_inv = np.linalg.inv(H)
+
+        # compute the covariance matrix, where N_DOF = 2*n_theta - n_shape, 2*n_theta since both R and Z are minimized on
+        self.shape_cov = H_inv * np.sum(self.lsq['fun'])/((2*self.n_theta)-len(self.shape))
 
         # interpolate the actual flux-surface contour to the theta basis
         if self._param != 'mxh':
@@ -334,12 +343,12 @@ class LocalEquilibrium():
             self.R_geo, self.Z_geo, self.theta_ref_geo = param_analytic(self.shape_analytic, np.append(self.theta,self.theta[0]), norm=False)
             self.Bt_geo = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_geo[:-1])
 
-            self.R_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
-            self.Z_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)], bounds_error=False, fill_value='extrapolate')(self.theta_ref_geo))
+            self.R_ref_geo = np.array(interpolate_periodic(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)], self.theta_ref_geo))
+            self.Z_ref_geo = np.array(interpolate_periodic(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)], self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)], self.theta_ref_geo))
             self.Bt_ref_geo  = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_ref_geo[:-1])
 
             self.Bp_geo = self.param_bpol(jr_analytic,self.shape_analytic, self.shape_deriv_analytic, self.theta, self.R_geo[:-1], self.dpsidr)#,method='analytic')
-            self.Bp_ref_geo = np.array(interpolate.interp1d(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],bounds_error=False,fill_value='extrapolate')(self.theta_ref_geo[:-1]))
+            self.Bp_ref_geo = np.array(interpolate_periodic(self.eq.fluxsurfaces['theta_RZ'][self.x_grid.index(self.x_loc)][:-1],self.eq.fluxsurfaces['Bpol'][self.x_grid.index(self.x_loc)][:-1],self.theta_ref_geo[:-1]))
 
         # optimize shape_derive based on L1 Bpol distance
         if opt_bpol:
