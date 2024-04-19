@@ -275,6 +275,13 @@ class LocalEquilibrium():
             self.Z_ref = self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)]
         self.Bt_ref  = interpolate.interp1d(self.eq.derived['psi'],self.eq.derived['fpol'],bounds_error=False)(self.eq.fluxsurfaces['psi'][self.x_grid.index(self.x_loc)])/(self.R_ref[:-1])
 
+        # compute flux-surface chi^2
+        observed = np.sqrt(self.R_param**2+self.Z_param**2)
+        expected = np.sqrt(self.R_ref**2+self.Z_ref**2)
+        self.chi_2 = np.sum((observed-expected)**2/expected)
+        # compute (modified) reduced chi^2 statistic (in percent), with N_DOF = n_theta-n_shape, if chi_2_nu > 0.005, typically the flux-surface fit starts deviating significantly
+        self.chi_2_nu = np.sqrt(np.sum(((observed-expected)/expected)**2)/((self.n_theta-len(self.shape))**2))*100
+
         # compute the self-consistent shape derivative parameters
         self.dxdr = np.gradient(self.eq.fluxsurfaces[x_label],self.eq.fluxsurfaces['fit_geo']['r'],edge_order=2)
         self.dpsidr = np.abs(self.dxdr*np.gradient(self.eq.fluxsurfaces['psi'],np.array(self.eq.fluxsurfaces[x_label])))[self.x_grid.index(self.x_loc)]
