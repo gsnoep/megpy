@@ -248,10 +248,20 @@ class LocalEquilibrium():
             print('Total fitting time:{:.3f}s'.format(opt_timing))
 
         # re-set the LocalEquilibrium state variables to the x_loc values
-        self.fs['R'] = copy.deepcopy(self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)])
-        self.fs['Z'] = copy.deepcopy(self.eq.fluxsurfaces['Z'][self.x_grid.index(self.x_loc)])
+        self.fs = {}
+        for key in self.eq.fluxsurfaces:
+            if isinstance(self.eq.fluxsurfaces[key],list) or isinstance(self.eq.fluxsurfaces[key],np.ndarray):
+                self.fs.update({key:copy.deepcopy(self.eq.fluxsurfaces[key][self.x_grid.index(self.x_loc)])})
+            else:
+                self.fs.update({key:copy.deepcopy(self.eq.fluxsurfaces[key])})
+        self.fs.update({'s':self.eq.derived['s'][self.x_grid.index(self.x_loc)]})
+        self.fs.update({'s_loc':(self.fs['fit_geo']['r']*np.gradient(np.log(self.eq.fluxsurfaces['q']),self.fs['fit_geo']['r'],edge_order=2))[self.x_grid.index(self.x_loc)]})
+        self.fs.update({'Bref_miller': (self.eq.fluxsurfaces['fpol']/self.fs['fit_geo']['R0'])[self.x_grid.index(self.x_loc)]})
+        self.fs.update({'B_unit': ((self.fs['q']/self.fs['fit_geo']['r'])*np.gradient(self.eq.fluxsurfaces['psi'],self.fs['fit_geo']['r'],edge_order=2))[self.x_grid.index(self.x_loc)]})
+        
         if self.verbose:
             print('Number of points on reference flux-surface: {}'.format(len(self.fs['R'])))
+        
         self.theta = copy.deepcopy(self.eq.fluxsurfaces['fit_geo']['theta'][self.x_grid.index(self.x_loc)])
         self.n_theta = len(self.theta)
         self.R_param, self.Z_param, self.theta_ref = self.param(self.shape, np.append(self.theta,self.theta[0]), norm=False)
