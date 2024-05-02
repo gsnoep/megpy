@@ -254,8 +254,7 @@ class LocalEquilibrium():
                 self.fs.update({key:copy.deepcopy(self.eq.fluxsurfaces[key][self.x_grid.index(self.x_loc)])})
             else:
                 self.fs.update({key:copy.deepcopy(self.eq.fluxsurfaces[key])})
-        self.fs.update({'s':self.eq.derived['s'][self.x_grid.index(self.x_loc)]})
-        self.fs.update({'s_loc':(self.fs['fit_geo']['r']*np.gradient(np.log(self.eq.fluxsurfaces['q']),self.fs['fit_geo']['r'],edge_order=2))[self.x_grid.index(self.x_loc)]})
+        self.fs.update({'s':(self.fs['fit_geo']['r']*np.gradient(np.log(self.eq.fluxsurfaces['q']),self.fs['fit_geo']['r'],edge_order=2))[self.x_grid.index(self.x_loc)]})
         self.fs.update({'Bref_miller': (self.eq.fluxsurfaces['fpol']/self.fs['fit_geo']['R0'])[self.x_grid.index(self.x_loc)]})
         self.fs.update({'B_unit': ((self.fs['q']/self.fs['fit_geo']['r'])*np.gradient(self.eq.fluxsurfaces['psi'],self.fs['fit_geo']['r'],edge_order=2))[self.x_grid.index(self.x_loc)]})
         
