@@ -513,7 +513,7 @@ class Equilibrium():
         psi_norm = np.abs((derived['psi'] - derived['simag'])/(derived['sibry'] - derived['simag']))
         derived['rho_pol'] = np.sqrt(psi_norm)
 
-        if 'rbbbs' in raw and 'zbbbs' in derived:
+        if 'rbbbs' in derived and 'zbbbs' in derived:
             # ensure the boundary coordinates are stored from midplane lfs to midplane hfs
             i_split = find(np.max(derived['rbbbs']),self.derived['rbbbs'])
             derived['rbbbs'] = np.hstack((derived['rbbbs'][i_split:],derived['rbbbs'][:i_split],derived['rbbbs'][i_split]))
@@ -545,6 +545,12 @@ class Equilibrium():
             i_xpoint_Z = find(np.min(derived['zbbbs']),derived['zbbbs']) # assuming lower null, JET-ILW shape for now
             derived['R_x'] = derived['rbbbs'][i_xpoint_Z]
             derived['Z_x'] = derived['zbbbs'][i_xpoint_Z]
+
+            bbbs_center = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
+
+            derived['R0'] = bbbs_center['X0']
+            derived['Z0'] = bbbs_center['Y0']
+            derived['a'] = bbbs_center['r']
 
         # compute LFS phi (toroidal flux in W/rad) grid from integrating q = d psi/d phi
         derived['phi'] = integrate.cumtrapz(derived['qpsi'],derived['psi'],initial=0)
