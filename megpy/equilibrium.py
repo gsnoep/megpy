@@ -333,6 +333,9 @@ class Equilibrium():
         # read the EX2GK data pickle
         ex2gk_data = read_pickle(f_path)
 
+        if 'META_SHOT' not in ex2gk_data:
+            ex2gk_data.update({'META_SHOT':'unknown'})
+
         # TODO: verify that the required variables are present in ex2gk data
 
         # collect and collate all the required eqdsk data from ex2gk_data
@@ -426,7 +429,7 @@ class Equilibrium():
                 'fpol': ids_eq_data['time_slice[]&profiles_1d&f'][-1],
                 'pres': ids_eq_data['time_slice[]&profiles_1d&pressure'][-1],
                 'ffprim': ids_eq_data['time_slice[]&profiles_1d&f_df_dpsi'][-1] * cocos_factor,
-                'pprim': ids_eq_data['time_slice[]&profiles_1d&dpressure_dpsi'][-1] * cocos_factor,
+                'pprime': ids_eq_data['time_slice[]&profiles_1d&dpressure_dpsi'][-1] * cocos_factor,
                 'psirz': ids_eq_data['time_slice[]&profiles_2d[]&psi'][-1,0] / cocos_factor,
                 'qpsi': ids_eq_data['time_slice[]&profiles_1d&q'][-1],
             })
