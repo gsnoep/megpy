@@ -296,6 +296,8 @@ class LocalEquilibrium():
         self.dpsidr = np.abs(self.dxdr*np.gradient(self.eq.fluxsurfaces['psi'],np.array(self.eq.fluxsurfaces[x_label])))[self.x_grid.index(self.x_loc)]
         self.Bunit = (self.eq.fluxsurfaces['q']/self.eq.fluxsurfaces['fit_geo']['r'])[self.x_grid.index(self.x_loc)]*self.dpsidr
 
+        self.fs.update({'dxdr':self.dxdr[self.x_grid.index(self.x_loc)]})
+
         self.shape_deriv = []
         s_deriv = {}
         if 'kappa' in self.param_labels or 'kappa' in self.fs:
