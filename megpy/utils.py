@@ -9,7 +9,6 @@ import os
 import copy
 import pickle
 import h5py
-from scipy import interpolate
 
 def number(x):
     """Check if x is actually a (real) number type (int,float).
@@ -318,7 +317,7 @@ def interpolate_periodic(x_in,y_in,x_out):
     y_extended = np.hstack((y_in,y_in,y_in))
     
     # interpolate to [0,2*pi]
-    y_out = interpolate.interp1d(x_extended,y_extended,bounds_error=False,kind='slinear')(x_out)
+    y_out = np.interp(x_out,x_extended,y_extended,period=2*np.pi)
     return y_out
 
 def read_pickle(f_path):
