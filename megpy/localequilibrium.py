@@ -1041,7 +1041,8 @@ class LocalEquilibrium():
         return cost
 
     # extraction tools
-    def extract_analytic_shape(fluxsurface):
+    @classmethod
+    def extract_analytic_shape(cls, fluxsurface):
         """Extract Turnbull-Miller geometry parameters [Turnbull PoP 6 1113 (1999)] from a flux-surface contour. Adapted from 'extract_miller_from_eqdsk.py' by D. Told.
 
         Args:
@@ -1060,12 +1061,18 @@ class LocalEquilibrium():
         miller_geo['kappa'] = (fluxsurface['Z_max'] - fluxsurface['Z_min'])/(2*fluxsurface['r'])
 
         # generate theta grid and interpolate the flux-surface trace to the Miller parameterization
-        R_miller = fluxsurface['R0'] + fluxsurface['r']*np.cos(fluxsurface['theta_RZ']+x*np.sin(fluxsurface['theta_RZ']))
-        Z_miller = np.hstack((interpolate.interp1d(fluxsurface['R'][:np.argmin(fluxsurface['R'])],fluxsurface['Z'][:np.argmin(fluxsurface['R'])],bounds_error=False)(R_miller[:find(np.min(fluxsurface['R']),R_miller)]),interpolate.interp1d(fluxsurface['R'][np.argmin(fluxsurface['R']):],fluxsurface['Z'][np.argmin(fluxsurface['R']):],bounds_error=False)(R_miller[find(np.min(fluxsurface['R']),R_miller):])))
+        theta_zeta = np.array([0.25*np.pi,0.75*np.pi,1.25*np.pi,1.75*np.pi])
+        theta_miller = fluxsurface['theta_RZ'] if len(fluxsurface['theta_RZ']) > 1 else theta_zeta
+        R_miller = fluxsurface['R0'] + fluxsurface['r']*np.cos(theta_miller+x*np.sin(theta_miller))
+        Z_miller = fluxsurface['Z0'] + miller_geo['kappa']*fluxsurface['r']*np.sin(theta_miller)
+        if len(fluxsurface['R']) > 1 and len(fluxsurface['Z']) > 1:
+            Z_miller = np.hstack((
+                interpolate.interp1d(fluxsurface['R'][:np.argmin(fluxsurface['R'])],fluxsurface['Z'][:np.argmin(fluxsurface['R'])],bounds_error=False)(R_miller[:find(np.min(fluxsurface['R']),R_miller)]),
+                interpolate.interp1d(fluxsurface['R'][np.argmin(fluxsurface['R']):],fluxsurface['Z'][np.argmin(fluxsurface['R']):],bounds_error=False)(R_miller[find(np.min(fluxsurface['R']),R_miller):])
+            ))
 
         # derive the squareness (zeta) from the Miller parameterization
-        theta_zeta = np.array([0.25*np.pi,0.75*np.pi,1.25*np.pi,1.75*np.pi])
-        Z_zeta = interpolate.interp1d(fluxsurface['theta_RZ'],Z_miller,bounds_error=False,fill_value='extrapolate')(theta_zeta)
+        Z_zeta = interpolate.interp1d(theta_miller,Z_miller,bounds_error=False,fill_value='extrapolate')(theta_zeta)
 
         # invert the Miller parameterization of Z, holding off on subtracting theta/sin(2*theta)
         zeta_4q = np.arcsin((Z_zeta-fluxsurface['Z0'])/(miller_geo['kappa']*fluxsurface['r']))/np.sin(2*theta_zeta)
@@ -1081,8 +1088,11 @@ class LocalEquilibrium():
         # compute the average squareness of the flux-surface
         miller_geo['zeta'] = 0.25*(miller_geo['zeta_uo']+miller_geo['zeta_ui']+miller_geo['zeta_li']+miller_geo['zeta_lo'])
 
-        miller_geo['R_miller'] = R_miller
-        miller_geo['Z_miller'] = fluxsurface['Z0']+miller_geo['kappa']*fluxsurface['r']*np.sin(fluxsurface['theta_RZ']+miller_geo['zeta']*np.sin(2*fluxsurface['theta_RZ']))
+        miller_geo['R_miller'] = np.array([fluxsurface['R0']])
+        miller_geo['Z_miller'] = np.array([fluxsurface['Z0']])
+        if len(fluxsurface['theta_RZ']) > 1:
+            miller_geo['R_miller'] = R_miller
+            miller_geo['Z_miller'] = fluxsurface['Z0']+miller_geo['kappa']*fluxsurface['r']*np.sin(fluxsurface['theta_RZ']+miller_geo['zeta']*np.sin(2*fluxsurface['theta_RZ']))
 
         return miller_geo
 
