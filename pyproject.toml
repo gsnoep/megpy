@@ -12,7 +12,7 @@ requires-python = ">=3"
 license = { file = "LICENSE" }
 keywords = ["fusion", "simulation", "toolkit", "equilibrium"]
 authors = [
-  { name = "Garud Snoep", email = "gsnoep@differ.nl" },
+  { name = "Garud Snoep", email = "gsnoep42@gmail.com" },
   { name = "Aaron Ho", email = "aaronkho@mit.edu" },
 ]
 classifiers = [
@@ -33,7 +33,7 @@ test = ["pytest"]
 [project.urls]
 "Homepage" = "https://github.com/gsnoep/megpy"
 "Bug Reports" = "https://github.com/gsnoep/megpy/issues"
-"Source" = "https://github.com/snoep/megpy"
+"Source" = "https://github.com/gsnoep/megpy"
 
 [project.scripts]
 megpy = "megpy.cli:parse"
