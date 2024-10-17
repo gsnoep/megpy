@@ -1,0 +1,39 @@
+[build-system]
+#requires = ['setuptools>=38.3.0']
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "megpy"
+version = "1.2.0"
+description = "MEGPy"
+readme = "README.md"
+requires-python = ">=3"
+license = { file = "LICENSE" }
+keywords = ["fusion", "simulation", "toolkit", "equilibrium"]
+authors = [
+  { name = "Garud Snoep", email = "gsnoep42@gmail.com" },
+  { name = "Aaron Ho", email = "aaronkho@mit.edu" },
+]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Operating System :: OS Independent",
+]
+
+dependencies = [
+  "numpy",
+  "pandas",
+  "xarray",
+  "scipy",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[project.urls]
+"Homepage" = "https://github.com/gsnoep/megpy"
+"Bug Reports" = "https://github.com/gsnoep/megpy/issues"
+"Source" = "https://github.com/gsnoep/megpy"
+
+[project.scripts]
+megpy = "megpy.cli:parse"
