@@ -590,15 +590,13 @@ def contour_center(c,tracer_diag='none'):
     """
 
     # close the contour if not closed
-    if c['X'][-1] != c['X'][0] or c['Y'][-1] != c['Y'][0]:
-        c['X'] = np.append(c['X'],c['X'][0])
-        c['Y'] = np.append(c['Y'],c['Y'][0])
+    c_ = copy.deepcopy(c)
+    if c_['X'][-1] != c_['X'][0] or c_['Y'][-1] != c_['Y'][0]:
+        c_['X'] = np.append(c_['X'],c_['X'][0])
+        c_['Y'] = np.append(c_['Y'],c_['Y'][0])
 
     # find the average elevation (midplane) of the contour by computing the vertical centroid [Candy PPCF 51 (2009) 105009]
-    moment = float(integrate.trapz(c['X']*c['Y'],c['Y']))
-    area = float(integrate.trapz(c['X'],c['Y']))
-    c['Y0'] = moment / area
-    #print('Y0', c['level'], moment, area)
+    c['Y0'] = integrate.trapezoid(c_['X']*c_['Y'],c_['Y'])/integrate.trapezoid(c_['X'],c_['Y'])
 
     # find the extrema of the contour in the radial direction at the average elevation
     c = contour_extrema(c,tracer_diag=tracer_diag)
@@ -606,7 +604,7 @@ def contour_center(c,tracer_diag='none'):
     # compute the minor and major radii of the contour at the average elevation
     c['r'] = (c['X_out']-c['X_in'])/2
     c['X0'] = (c['X_out']+c['X_in'])/2
-    #c['X0'] = integrate.trapz(c['X']*c['Y'],c['X'])/integrate.trapz(c['Y'],c['X'])
+    #c['X0'] = integrate.trapezoid(c['X']*c['Y'],c['X'])/integrate.trapezoid(c['Y'],c['X'])
 
     return c
 
