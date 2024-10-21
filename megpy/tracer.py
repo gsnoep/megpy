@@ -485,7 +485,6 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
 
         # collate in order of theta, counterclockwise from outer midplane
         XY_contour = sorted(XY_contour['right']['top']+XY_contour['left']['top']+XY_contour['left']['bottom']+XY_contour['right']['bottom'], key=itemgetter(2))
-        dist_limit = 1.2 * np.sqrt(dX ** 2 + dY ** 2)
         X_contour = [x for x,y,t in XY_contour]
         Y_contour = [y for x,y,t in XY_contour]
         T_contour = [t for x,y,t in XY_contour]
@@ -496,6 +495,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
         if T_contour[0] != T_contour[-1]:
             T_contour.append(T_contour[0])
 
+        dist_limit = 1.2 * np.sqrt(dX ** 2 + dY ** 2)
         d_contour = np.sqrt(np.diff(X_contour) ** 2 + np.diff(Y_contour) ** 2)
         itr = 0
         while itr < len(d_contour):
