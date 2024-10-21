@@ -52,9 +52,9 @@ def find_dual_value(x, y, split_index, level, threshold, method='normal', sign='
         upper_index = None
 
     # chop x,y in two parts to separate two solutions
-    x_lower = x[lower_index:split_index+1]
+    x_lower = x[lower_index:split_index+1][::-1]
     x_upper = x[split_index:upper_index]
-    y_lower = y[lower_index:split_index+1]
+    y_lower = y[lower_index:split_index+1][::-1]
     y_upper = y[split_index:upper_index]
 
     # if the normal method provides spikey contour traces, bound the interpolation domain and extrapolate the intersection
