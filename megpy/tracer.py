@@ -483,10 +483,9 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
             else:
                 do_l = False
 
-        # collate all the traced coordinates of the contour and sort by increasing X - why did you do this Garud?
         # collate in order of theta, counterclockwise from outer midplane
         XY_contour = sorted(XY_contour['right']['top']+XY_contour['left']['top']+XY_contour['left']['bottom']+XY_contour['right']['bottom'], key=itemgetter(2))
-        max_dist = 1.2 * np.sqrt(dX ** 2 + dY ** 2)
+        dist_limit = 1.2 * np.sqrt(dX ** 2 + dY ** 2)
         X_contour = [x for x,y,t in XY_contour]
         Y_contour = [y for x,y,t in XY_contour]
         T_contour = [t for x,y,t in XY_contour]
@@ -500,7 +499,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
         d_contour = np.sqrt(np.diff(X_contour) ** 2 + np.diff(Y_contour) ** 2)
         itr = 0
         while itr < len(d_contour):
-            if d_contour[itr] > max_dist:
+            if d_contour[itr] > dist_limit:
                 X_contour.pop(itr+1)
                 Y_contour.pop(itr+1)
                 T_contour.pop(itr+1)
@@ -549,7 +548,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
         contour_ = {'X':X_,'Y':Y_,'level':lvl[0]}
 
         # diagnostic plot for checking the complete contour trace, e.g. in combination with the contour extrema fitting
-        if tracer_diag == 'contour' and lvl < -4.8:
+        if tracer_diag == 'contour': # and np.abs(lvl - center) > (0.7 * np.abs(thr - center)):
             #plt.figure()
             plt.plot(contour_['X'],contour_['Y'],'b-')
             if ((center < thr) and (lvl < thr)) or ((center > thr) and (lvl > thr)):
@@ -557,6 +556,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
             plt.axis('scaled')
             plt.xlabel('X [m]')
             plt.ylabel('Y [m]')
+            plt.title(f'psi = {lvl[0]:.4f}')
             plt.show()
 
         if symmetrise:
