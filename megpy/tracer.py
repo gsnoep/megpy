@@ -490,6 +490,13 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
         X_contour = [x for x,y,t in XY_contour]
         Y_contour = [y for x,y,t in XY_contour]
         T_contour = [t for x,y,t in XY_contour]
+        if X_contour[0] != X_contour[-1]:
+            X_contour.append(X_contour[0])
+        if Y_contour[0] != Y_contour[-1]:
+            Y_contour.append(Y_contour[0])
+        if T_contour[0] != T_contour[-1]:
+            T_contour.append(T_contour[0])
+
         d_contour = np.sqrt(np.diff(X_contour) ** 2 + np.diff(Y_contour) ** 2)
         itr = 0
         while itr < len(d_contour):
