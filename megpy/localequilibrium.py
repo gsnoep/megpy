@@ -268,7 +268,10 @@ class LocalEquilibrium():
 
         # compute the Hessian estimate from the least squares fit Jacobian
         H = self.lsq['jac'].T @ self.lsq['jac']
-        H_inv = np.linalg.inv(H)
+        try:
+            H_inv = np.linalg.inv(H)
+        except:
+            H_inv = np.nan # in case the Hessian is singular
 
         # compute the covariance matrix, where N_DOF = 2*n_theta - n_shape, 2*n_theta since both R and Z are minimized on
         self.shape_cov = H_inv * np.sum(self.lsq['fun'])/((2*self.n_theta)-len(self.shape))
