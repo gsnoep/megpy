@@ -663,10 +663,10 @@ class Equilibrium():
                 interp_method = 'normal'
                 if np.max(psirz[np.where(psirz!=0.0)]) <= threshold:
                     threshold = np.max(psirz[np.where(psirz!=0.0)])
-                    interp_method = 'bounded_extrapolation'
+                #    interp_method = 'bounded_extrapolation'
                 elif np.min(psirz[np.where(psirz!=0.0)]) >= threshold:
                     threshold = np.min(psirz[np.where(psirz!=0.0)])
-                    interp_method = 'bounded_extrapolation'
+                #    interp_method = 'bounded_extrapolation'
 
                 tracer_timing = 0.
                 analytic_timing = 0.
