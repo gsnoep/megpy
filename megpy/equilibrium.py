@@ -663,10 +663,10 @@ class Equilibrium():
                 interp_method = 'normal'
                 if np.max(psirz[np.where(psirz!=0.0)]) <= threshold:
                     threshold = np.max(psirz[np.where(psirz!=0.0)])
-                    interp_method = 'bounded_extrapolation'
+                #    interp_method = 'bounded_extrapolation'
                 elif np.min(psirz[np.where(psirz!=0.0)]) >= threshold:
                     threshold = np.min(psirz[np.where(psirz!=0.0)])
-                    interp_method = 'bounded_extrapolation'
+                #    interp_method = 'bounded_extrapolation'
 
                 tracer_timing = 0.
                 analytic_timing = 0.
@@ -681,7 +681,7 @@ class Equilibrium():
                         psi_fs = float(interpolate.interp1d(derived[x_label],derived['psi'])(x_fs))
                         q_fs = float(interpolate.interp1d(derived[x_label],derived['qpsi'])(x_fs))
                         fpol_fs = float(interpolate.interp1d(derived[x_label],derived['fpol'])(x_fs))
-                        
+
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
                         fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
@@ -696,36 +696,54 @@ class Equilibrium():
                                 fs[_key] = fs.pop(key)
                         del fs['label']
                         del fs['level']
+                        if not np.isfinite(fs['r']):
+                            r_res = np.sqrt((R[i_rmaxis] - derived['rmaxis']) ** 2 + (Z[i_zmaxis] - derived['zmaxis']) ** 2)
+                            fs['r'] = r_res * (psi_fs - derived['simag']) / (psirz[i_zmaxis,i_rmaxis] - derived['simag'])
+                            if fs['r'] == 0.0:
+                                fs['r'] = 1.0e-4
+                        if not np.isfinite(fs['R0']):
+                            fs['R0'] = derived['rmaxis']
+                        if not np.isfinite(fs['Z0']):
+                            fs['Z0'] = derived['zmaxis']
+                        if not np.isfinite(fs['R_Zmax']):
+                            fs['R_Zmax'] = derived['rmaxis']
+                        if not np.isfinite(fs['R_Zmin']):
+                            fs['R_Zmin'] = derived['rmaxis']
+                        if not np.isfinite(fs['Z_max']):
+                            fs['Z_max'] = derived['zmaxis'] + fs['r']
+                        if not np.isfinite(fs['Z_min']):
+                            fs['Z_min'] = derived['zmaxis'] - fs['r']
 
                         if analytic_shape:
                             time1 = time.time()
                             fs['miller_geo'] = LocalEquilibrium.extract_analytic_shape(fs)
                             analytic_timing += time.time()-time1
-                        
+
+                        _incl_B = False
                         if incl_B:
                             if isinstance(incl_B,list):
                                 _incl_B = incl_B[i_x_fs]
                             else:
                                 _incl_B = incl_B
-                        else:
-                            _incl_B = False
-                        
+
                         if _incl_B:
-                            # to speed up the Bpol interpolation generate a reduced Z,R mesh
-                            i_R_in = find(fs['R_in'],self.derived['R'])-2
-                            i_R_out = find(fs['R_out'],self.derived['R'])+2
-                            i_Z_min = find(fs['Z_min'],self.derived['Z'])-2
-                            i_Z_max = find(fs['Z_max'],self.derived['Z'])+2
-                            R_mesh,Z_mesh = np.meshgrid(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max])
-                            RZ_mesh = np.column_stack((Z_mesh.flatten(),R_mesh.flatten()))
+                            B_pol_fs = 0.0
+                            B_tor_fs = fs['fpol'] / fs['R0']
+                            if len(fs['R']) > 5:
+                                # to speed up the Bpol interpolation generate a reduced Z,R mesh
+                                i_R_in = find(fs['R_in'],self.derived['R'])-2
+                                i_R_out = find(fs['R_out'],self.derived['R'])+2
+                                i_Z_min = find(fs['Z_min'],self.derived['Z'])-2
+                                i_Z_max = find(fs['Z_max'],self.derived['Z'])+2
+                                R_mesh,Z_mesh = np.meshgrid(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max])
+                                RZ_mesh = np.column_stack((Z_mesh.flatten(),R_mesh.flatten()))
 
-                            # interpolate Bpol and Btor
-                            B_pol_fs = interpolate.griddata(RZ_mesh,self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out].flatten(),(fs['Z'],fs['R']),method='cubic')
-                            #B_pol_fs = np.array([])
-                            #for i_R,RR in enumerate(fs['R']):
-                            #    B_pol_fs = np.append(B_pol_fs,interpolate.interp2d(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max],self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out],bounds_error=False,fill_value='extrapolate')(RR,fs['Z'][i_R]))
-                            B_tor_fs = interpolate.interp1d(self.derived['psi'],self.derived['fpol'],bounds_error=False)(psi_fs)/fs['R']
-
+                                # interpolate Bpol and Btor
+                                B_pol_fs = interpolate.griddata(RZ_mesh,self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out].flatten(),(fs['Z'],fs['R']),method='cubic')
+                                #B_pol_fs = np.array([])
+                                #for i_R,RR in enumerate(fs['R']):
+                                #    B_pol_fs = np.append(B_pol_fs,interpolate.interp2d(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max],self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out],bounds_error=False,fill_value='extrapolate')(RR,fs['Z'][i_R]))
+                                B_tor_fs = interpolate.interp1d(self.derived['psi'],self.derived['fpol'],bounds_error=False)(np.array([psi_fs]))[0]/fs['R']
                             fs.update({'Bpol':B_pol_fs, 'Btor':B_tor_fs, 'B':np.sqrt(B_pol_fs**2+B_tor_fs**2)})
                         else:
                             fs.update({'Bpol':np.array([]), 'Btor':np.array([]), 'B':np.array([])})
@@ -785,18 +803,22 @@ class Equilibrium():
                             fluxsurfaces[key].insert(0,derived['rmaxis'])
                         elif key in ['Z','Z0','Z_max','Z_min']:
                             fluxsurfaces[key].insert(0,derived['zmaxis'])
-                        elif key in ['kappa','delta','zeta','s_kappa','s_delta','s_zeta']:
+                        elif key in ['q','kappa','delta','zeta','s_kappa','s_delta','s_zeta']:
                             fluxsurfaces[key].insert(0,fluxsurfaces[key][0])
                         else:
                             if isinstance(fluxsurfaces[key],dict):
                                 for _key in fluxsurfaces[key]:
-                                    fluxsurfaces[key][_key].insert(0,0.*fluxsurfaces[key][_key][-1])
+                                    if _key in ['delta_u','delta_l','delta','kappa','zeta_uo','zeta_ui','zeta_li','zeta_lo','zeta']:
+                                        fluxsurfaces[key][_key].insert(0,fluxsurfaces[key][_key][0])
+                                    else:
+                                        fluxsurfaces[key][_key].insert(0,0.*fluxsurfaces[key][_key][-1])
                             elif isinstance(fluxsurfaces[key],list):
                                 fluxsurfaces[key].insert(0,0.*fluxsurfaces[key][-1])
 
                 # add the midplane average geometric flux surface quantities to derived
                 derived['Ro'] = np.array(fluxsurfaces['R0'])
-                derived['Ro'][0] = derived['Ro'][1] # clear the starting zero
+                if derived['Ro'][0] == 0.0:
+                    derived['Ro'][0] = derived['Ro'][1] # clear the starting zero
                 derived['R0'] = derived['Ro'][-1] # midplane average major radius of the lcfs
                 derived['Zo'] = np.array(fluxsurfaces['Z0'])
                 derived['Z0'] = derived['Zo'][-1] # average elevation of the lcfs
