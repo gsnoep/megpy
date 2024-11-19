@@ -20,7 +20,7 @@ $ python -m megpy -h
 ```
 Or use the Python API, of which some examples can be found in /examples/.
 
-Join the repository to contribute or raise issues!
+To contribute, open a pull request or raise an issue!
 
 # Supported equilibrium formats
 - EQDSK [(g-file)](https://w3.pppl.gov/ntcc/TORAY/G_EQDSK.pdf) from EFIT, ESCO, CHEASE or LIUQE
@@ -43,11 +43,11 @@ If you use MEGPy in your research, please cite [(bibtex)](https://github.com/gsn
 
                     .#&%%%-.
                 <===#%%%%%%%%%%.
-                   ?==%%( )%%%%%
-                    )%%%%%%%%%%%%\
-                    )%%%%%%%%%%%..%%%
-                    )%%%%%%%%&..    .\%.
-                     %%%%%%%% &\,.  ..\%.
+                   ?==%%( )%%%%%%
+                    )%%%%%%%%%%%%%\
+                    (%%%%%%%%%%%..%%%
+                    (%%%%%%%%&..    .\%.
+                     %%%%%%%% &\,.  ..\%%%.
                      M%%%%%%%...&&%\%%%%%%%%%-
                        %%%%%.       .\%%%%%%%%%%.
                         %%%..             .\%%%%%%%.
