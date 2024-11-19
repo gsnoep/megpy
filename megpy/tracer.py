@@ -627,6 +627,108 @@ def contour_extrema(c,tracer_diag='none'):
     Returns:
         (dict): the contour with the extrema information added
     """
+    # restack R_fs and Z_fs to get a continuous midplane outboard trace
+    X_out = np.hstack((c['X'][int(0.9*len(c['Y'])):],c['X'][:int(0.1*len(c['Y']))]))
+    Y_out = np.hstack((c['Y'][int(0.9*len(c['Y'])):],c['Y'][:int(0.1*len(c['Y']))]))
+
+    X_in = c['X'][int(len(c['Y'])/2)-int(0.1*len(c['Y'])):int(len(c['Y'])/2)+int(0.1*len(c['Y']))]
+    Y_in = c['Y'][int(len(c['Y'])/2)-int(0.1*len(c['Y'])):int(len(c['Y'])/2)+int(0.1*len(c['Y']))]
+
+    # find the approximate(!) extrema in Y of the contour
+    Y_max = np.max(c['Y'])
+    Y_min = np.min(c['Y'])
+
+    # check if the midplane of the contour is provided
+    if 'Y0' not in c:
+        c['Y0'] = Y_min+((Y_max-Y_min)/2)
+
+    # find the extrema in X of the contour at the midplane
+    c['X_out'] = float(interpolate.interp1d(Y_out,X_out,bounds_error=False)(c['Y0']))
+    c['X_in'] = float(interpolate.interp1d(Y_in,X_in,bounds_error=False)(c['Y0']))
+
+    # in case level is out of bounds in these interpolations
+    if np.isnan(c['X_out']) or np.isinf(c['X_out']):
+        # restack X to get continuous trace on right side
+        X_ = np.hstack((c['X'][np.argmin(c['X']):],c['X'][:np.argmin(c['X'])]))
+        # take the derivative of X_
+        dX_ = np.gradient(X_,edge_order=2)
+        # find X_out by interpolating the derivative of X to 0.
+        dX_out =  dX_[np.argmax(dX_):np.argmin(dX_)]
+        X_out = X_[np.argmax(dX_):np.argmin(dX_)]
+        c['X_out'] = float(interpolate.interp1d(dX_out,X_out,bounds_error=False)(0.))
+    if np.isnan(c['X_in']) or np.isinf(c['X_in']):
+        dX = np.gradient(c['X'],edge_order=2)
+        dX_in =  dX[np.argmin(dX):np.argmax(dX)]
+        X_in = c['X'][np.argmin(dX):np.argmax(dX)]
+        c['X_in'] = float(interpolate.interp1d(dX_in,X_in,bounds_error=False)(0.))
+
+    # generate filter lists that take a representative slice of the max and min of the contour coordinates around the approximate Y_max and Y_min
+    alpha = (0.9+0.075*c['label']**2) # magic to ensure just enough points are 
+    max_filter = [z > alpha*(Y_max-c['Y0']) for z in c['Y']-c['Y0']]
+    min_filter = [z < alpha*(Y_min-c['Y0']) for z in c['Y']-c['Y0']]
+
+    # patch for the filter lists in case the filter criteria results in < 7 points (minimum of required for 5th order fit + 1)
+    i_Y_max = np.argmax(c['Y'])
+    i_Y_min = np.argmin(c['Y'])
+
+    if np.array(max_filter).sum() < 7:
+        for i in range(i_Y_max-3,i_Y_max+4):
+            if c['Y'][i] >= (np.min(c['Y'])+np.max(c['Y']))/2:
+                max_filter[i] = True
+
+    if np.array(min_filter).sum() < 7:
+        for i in range(i_Y_min-3,i_Y_min+4):
+            if c['Y'][i] <= (np.min(c['Y'])+np.max(c['Y']))/2:
+                min_filter[i] = True
+
+    # fit the max and min slices of the contour, compute the gradient of these fits and interpolate to zero to find X_Ymax, Y_max, X_Ymin and Y_min
+    X_Ymax_fit = np.linspace(c['X'][max_filter][-1],c['X'][max_filter][0],5000)
+    try:
+        Y_max_fit = interpolate.UnivariateSpline(c['X'][max_filter][::-1],c['Y'][max_filter][::-1],k=5)(X_Ymax_fit)
+    except:
+        Y_max_fit = np.poly1d(np.polyfit(c['X'][max_filter][::-1],c['Y'][max_filter][::-1],5))(X_Ymax_fit)
+    Y_max_fit_grad = np.gradient(Y_max_fit,X_Ymax_fit)
+
+    X_Ymax = interpolate.interp1d(Y_max_fit_grad,X_Ymax_fit,bounds_error=False)(0.)
+    Y_max = interpolate.interp1d(X_Ymax_fit,Y_max_fit,bounds_error=False)(X_Ymax)
+
+    X_Ymin_fit = np.linspace(c['X'][min_filter][-1],c['X'][min_filter][0],5000)
+    try:
+        Y_min_fit = interpolate.UnivariateSpline(c['X'][min_filter],c['Y'][min_filter],k=5)(X_Ymin_fit)
+    except:
+        Y_min_fit = np.poly1d(np.polyfit(c['X'][min_filter][::-1],c['Y'][min_filter][::-1],5))(X_Ymin_fit)
+    Y_min_fit_grad = np.gradient(Y_min_fit,X_Ymin_fit)
+
+    X_Ymin = interpolate.interp1d(Y_min_fit_grad,X_Ymin_fit,bounds_error=False)(0.)
+    Y_min = interpolate.interp1d(X_Ymin_fit,Y_min_fit,bounds_error=False)(X_Ymin)
+
+    if tracer_diag =='fs':
+        # diagnostic plots
+        print(len(c['X'][max_filter]),len(c['X'][min_filter]))
+
+        plt.plot(c['X'][max_filter],c['Y'][max_filter],'r.')
+        plt.plot(c['X'][min_filter],c['Y'][min_filter],'r.')
+        plt.plot(X_Ymax_fit,Y_max_fit,'g-')
+        plt.plot(X_Ymin_fit,Y_min_fit,'g-')
+        plt.axis('equal')
+        plt.show()
+
+    c.update({'X_Ymax':float(X_Ymax),'Y_max':float(Y_max),'X_Ymin':float(X_Ymin),'Y_min':float(Y_min)})
+
+    return c
+
+def _contour_extrema(c,tracer_diag='none'):
+    """Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
+
+    Args:
+        `c` (dict): description of the contour, c={['X'],['Y'],['Y0'],['label'],...}, where:
+                    - X,Y: the contour coordinates, 
+                    - Y0 (optional): is the average elevation,
+                    - label is the normalised contour level label np.sqrt((level - center)/(threshold - center)).
+
+    Returns:
+        (dict): the contour with the extrema information added
+    """
     n = 16
     zpad = 2 if len(c['Y']) <= n else 3
     zmid = int(len(c['Y']) / 2)
