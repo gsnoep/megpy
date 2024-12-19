@@ -561,7 +561,7 @@ def contour(X,Y,Z=None,level=None,threshold=None,i_center=None,interp_method='no
 
         if symmetrise:
             R_sym = (contour_['X']+contour_['X'][::-1])/2
-            Z_sym = (contour_['Y']-contour_['Y'][::-1])/2+integrate.trapz(contour_['X']*contour_['Y'],contour_['Y'])/integrate.trapz(contour_['X'],contour_['Y'])
+            Z_sym = (contour_['Y']-contour_['Y'][::-1])/2+integrate.trapezoid(contour_['X']*contour_['Y'],contour_['Y'])/integrate.trapezoid(contour_['X'],contour_['Y'])
             contour_['X_sym']=R_sym
             contour_['Y_sym']=Z_sym
 

@@ -556,7 +556,7 @@ class Equilibrium():
             derived['a'] = bbbs_center['r']
 
         # compute LFS phi (toroidal flux in W/rad) grid from integrating q = d psi/d phi
-        derived['phi'] = integrate.cumtrapz(derived['qpsi'],derived['psi'],initial=0)
+        derived['phi'] = integrate.cumulative_trapezoid(derived['qpsi'],derived['psi'],initial=0)
 
         # construct the corresponding rho_tor grid
         if derived['phi'][-1] !=0:
