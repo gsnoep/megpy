@@ -727,6 +727,7 @@ class Equilibrium():
                                 _incl_B = incl_B
 
                         if _incl_B:
+
                             B_pol_fs = 0.0
                             B_tor_fs = fs['fpol'] / fs['R0']
                             if len(fs['R']) > 5:
@@ -745,9 +746,14 @@ class Equilibrium():
                                 #    B_pol_fs = np.append(B_pol_fs,interpolate.interp2d(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max],self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out],bounds_error=False,fill_value='extrapolate')(RR,fs['Z'][i_R]))
                                 B_tor_fs = interpolate.interp1d(self.derived['psi'],self.derived['fpol'],bounds_error=False)(np.array([psi_fs]))[0]/fs['R']
                             fs.update({'Bpol':B_pol_fs, 'Btor':B_tor_fs, 'B':np.sqrt(B_pol_fs**2+B_tor_fs**2)})
+
+                            flux_integrand = np.sqrt(np.diff(fs['R']) ** 2.0 + np.diff(fs['Z']) ** 2.0) / np.abs(fs['Bpol'][:-1])
+                            fs['Vprime'] = np.sum(flux_integrand)
+                            fs['1/R'] = np.sum(flux_integrand / fs['R'][:-1]) / np.sum(flux_integrand)
+
                         else:
-                            fs.update({'Bpol':np.array([]), 'Btor':np.array([]), 'B':np.array([])})
-                        
+                            fs.update({'Bpol':np.array([]), 'Btor':np.array([]), 'B':np.array([]), 'Vprime':np.array([]), '1/R':np.array([])})
+
                         fs = list_to_array(fs)
 
                         # merge the flux surface data into the Equilibrium()
