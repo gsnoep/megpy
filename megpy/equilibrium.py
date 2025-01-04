@@ -786,7 +786,7 @@ class Equilibrium():
                             if 'X' in key or 'Y' in key:
                                 _key = (key.replace('X','R')).replace('Y','Z')
                                 lcfs[_key] = lcfs.pop(key)
-                        derived.update({'rbbbs':lcfs['X'],'zbbbs':lcfs['Y'],'nbbbs':len(lcfs['X'])})
+                        derived.update({'rbbbs':lcfs['R'],'zbbbs':lcfs['Z'],'nbbbs':len(lcfs['R'])})
                     if analytic_shape:
                         lcfs.update({'miller_geo':LocalEquilibrium.extract_analytic_shape(lcfs)})
                 
@@ -800,14 +800,53 @@ class Equilibrium():
                             lcfs[_key] = lcfs.pop(key)
                     del lcfs['label']
                     del lcfs['level']
+
+                    _incl_B = False
+                    if incl_B:
+                        if isinstance(incl_B,list):
+                            _incl_B = incl_B[i_x_fs]
+                        else:
+                            _incl_B = incl_B
+
+                    if _incl_B:
+
+                        B_pol_fs = 0.0
+                        B_tor_fs = lcfs['fpol'] / lcfs['R0']
+                        if len(lcfs['R']) > 5:
+                            # to speed up the Bpol interpolation generate a reduced Z,R mesh
+                            i_R_in = find(lcfs['R_in'],self.derived['R'])-2
+                            i_R_out = find(lcfs['R_out'],self.derived['R'])+2
+                            i_Z_min = find(lcfs['Z_min'],self.derived['Z'])-2
+                            i_Z_max = find(lcfs['Z_max'],self.derived['Z'])+2
+                            R_mesh,Z_mesh = np.meshgrid(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max])
+                            RZ_mesh = np.column_stack((Z_mesh.flatten(),R_mesh.flatten()))
+
+                            # interpolate Bpol and Btor
+                            B_pol_fs = interpolate.griddata(RZ_mesh,self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out].flatten(),(lcfs['Z'],lcfs['R']),method='cubic')
+                            B_tor_fs = interpolate.interp1d(self.derived['psi'],self.derived['fpol'],bounds_error=False)(np.array([psi_fs]))[0]/lcfs['R']
+                        lcfs.update({'Bpol':B_pol_fs, 'Btor':B_tor_fs, 'B':np.sqrt(B_pol_fs**2+B_tor_fs**2)})
+
+                        flux_integrand = np.sqrt(np.diff(lcfs['R']) ** 2.0 + np.diff(lcfs['Z']) ** 2.0) / np.abs(lcfs['Bpol'][:-1])
+                        lcfs['Vprime'] = np.sum(flux_integrand)
+                        lcfs['1/R'] = np.sum(flux_integrand / lcfs['R'][:-1]) / np.sum(flux_integrand)
+
+                    else:
+                        lcfs.update({'Bpol':np.array([]), 'Btor':np.array([]), 'B':np.array([]), 'Vprime':np.array([]), '1/R':np.array([])})
+
+                    lcfs = list_to_array(lcfs)
+
                     # append the lcfs values to the end of the flux surface data
                     merge_trees(lcfs,fluxsurfaces)
 
                     # add a zero at the start of all flux surface quantities
                     for key in fluxsurfaces:
-                        if key in ['R','R0','R_Zmax','R_Zmin','R_in','R_out']:
+                        if key in ['R']:
+                            fluxsurfaces[key].insert(0,np.array([derived['rmaxis']]))
+                        elif key in ['Z']:
+                            fluxsurfaces[key].insert(0,np.array([derived['zmaxis']]))
+                        elif key in ['R0','R_Zmax','R_Zmin','R_in','R_out']:
                             fluxsurfaces[key].insert(0,derived['rmaxis'])
-                        elif key in ['Z','Z0','Z_max','Z_min']:
+                        elif key in ['Z0','Z_max','Z_min']:
                             fluxsurfaces[key].insert(0,derived['zmaxis'])
                         elif key in ['q','kappa','delta','zeta','s_kappa','s_delta','s_zeta']:
                             fluxsurfaces[key].insert(0,fluxsurfaces[key][0])
