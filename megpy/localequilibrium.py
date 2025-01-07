@@ -1061,6 +1061,9 @@ class LocalEquilibrium():
         miller_geo['delta_l'] = (fluxsurface['R0'] - fluxsurface['R_Zmin'])/fluxsurface['r']
         miller_geo['delta'] = (miller_geo['delta_u']+miller_geo['delta_l'])/2
         x = np.arcsin(miller_geo['delta'])
+        
+        miller_geo['kappa_u'] = (fluxsurface['Z_max'] - fluxsurface['Z_Rmax'])/fluxsurface['r']
+        miller_geo['kappa_l'] = (fluxsurface['Z_Rmax'] - fluxsurface['Z_min'])/fluxsurface['r']
         miller_geo['kappa'] = (fluxsurface['Z_max'] - fluxsurface['Z_min'])/(2*fluxsurface['r'])
 
         # generate theta grid and interpolate the flux-surface trace to the Miller parameterization
