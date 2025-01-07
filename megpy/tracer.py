@@ -702,6 +702,15 @@ def contour_extrema(c,tracer_diag='none'):
     X_Ymin = interpolate.interp1d(Y_min_fit_grad,X_Ymin_fit,bounds_error=False)(0.)
     Y_min = interpolate.interp1d(X_Ymin_fit,Y_min_fit,bounds_error=False)(X_Ymin)
 
+    i_X_max = np.argmax(c['X'])
+    i_X_min = np.argmin(c['X'])
+
+    X_max = c['X'][i_X_max]
+    Y_Xmax = c['Y'][i_X_max]
+
+    X_min = c['X'][i_X_min]
+    Y_Xmin = c['Y'][i_X_min]
+
     if tracer_diag =='fs':
         # diagnostic plots
         print(len(c['X'][max_filter]),len(c['X'][min_filter]))
@@ -713,7 +722,10 @@ def contour_extrema(c,tracer_diag='none'):
         plt.axis('equal')
         plt.show()
 
-    c.update({'X_Ymax':float(X_Ymax),'Y_max':float(Y_max),'X_Ymin':float(X_Ymin),'Y_min':float(Y_min)})
+    c.update({'X_Ymax':float(X_Ymax),'Y_max':float(Y_max),
+              'X_Ymin':float(X_Ymin),'Y_min':float(Y_min),
+              'X_min':float(X_min),'Y_Xmin':float(Y_Xmin),
+              'X_max':float(X_max),'Y_Xmax':float(Y_Xmax)})
 
     return c
 
