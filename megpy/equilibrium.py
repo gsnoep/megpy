@@ -109,7 +109,7 @@ class Equilibrium():
                                 # split the row string into separate values by ' ' as delimiter, adding a space before a minus sign if it is the delimiter
                                 values = list(filter(None,re.sub(r'(?<![Ee])-',' -',row).rstrip('\n').split(' ')))
                                 # select all the numerical values in the list of sub-strings of the current row, but keep them as strings so the fortran formatting remains
-                                numbers = [j for i in [number for number in (re.findall(r'^(?![A-Z]).*-?\ *[0-9]+\.?[0-9]*(?:[Ee]\ *[-+]?\ *[0-9]+)?', value) for value in values)] for j in i]
+                                numbers = [j for i in [num for num in (re.findall(r'^(?![A-Z]).*-?\ *[0-9]+\.?[0-9]*(?:[Ee]\ *[-+]?\ *[0-9]+)?', value) for value in values)] for j in i]
                                 # select all the remaining sub-strings and store them in a separate list
                                 strings = [value for value in values if value not in numbers]
                                 # handle the exception of the first line where in the case description numbers and strings can be mixed
