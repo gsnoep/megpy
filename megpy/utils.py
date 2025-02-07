@@ -336,3 +336,43 @@ def read_hdf5(f_path):
     except (OSError, FileNotFoundError) as error:
         print("Error loading HDF5 file:", error)
         return None
+
+
+def define_cocos(cocos_number):
+    """Defines sign conventions given a COCOS number
+    """
+    # Default dictionary represents COCOS=1
+    convention = {
+        'eBp': 0,   # Normalization of flux by 2 pi
+        'sBp': 1,   # Increasing or decreasing flux from axis (1 = increasing)
+        'scyl': 1,  # Handedness of cylindrical coordinates (1 = right-handed)
+        'spol': 1,  # Handedness of poloidal coordinates (1 = right-handed)
+        'srel': 1,  # Swap handedness between cylindrical and poloidal (ill-advised but possible) (1 = no swap)
+    }
+    if cocos_number < 0:
+        cocos_number = -cocos_number
+        convention['srel'] = -1
+    if cocos_number > 10:
+        cocos_number -= 10
+        convention['eBp'] = 1
+    if cocos_number in [3, 4, 7, 8]:
+        convention['sBp'] = -1
+    if cocos_number in [2, 4, 6, 8]:
+        convention['scyl'] = -1
+    if cocos_number in [3, 4, 5, 6]:
+        convention['spol'] = -1
+    return convention
+
+
+def define_cocos_converter(cocos_in, cocos_out):
+    """Combines sign conventions from two COCOS numbers to inform transformation
+    """
+    c_in = define_cocos(cocos_in)
+    converter = define_cocos(cocos_out)
+    for key in converter:
+        if key == 'eBp': # Multiply (not divide!) flux by (2 pi) ** eBp
+            converter[key] -= c_in[key]
+        else:
+            converter[key] *= c_in[key]
+    return converter
+
