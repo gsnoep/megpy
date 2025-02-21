@@ -684,7 +684,8 @@ class Equilibrium():
 
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
-                        fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
+                        #fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
+                        fs = tracer.contour(R,Z,psirz,psi_fs)
                         tracer_timing += time.time()-time0
                         fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
                         if x_label != 'rho_tor' and 'rho_tor' in derived:
@@ -780,7 +781,8 @@ class Equilibrium():
                                 lcfs[_key] = lcfs.pop(key)
                         lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
                     else:
-                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
+                        lcfs = tracer.contour(R,Z,psirz,psi_fs,kind='s',x_point=True)
+                        #lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
                         keys = copy.deepcopy(list(lcfs.keys()))
                         for key in keys:
                             if 'X' in key or 'Y' in key:
