@@ -554,6 +554,11 @@ class Equilibrium():
             derived['R0'] = bbbs_center['X0']
             derived['Z0'] = bbbs_center['Y0']
             derived['a'] = bbbs_center['r']
+        
+        if 'rlim' not in derived:
+            derived['rlim'] = np.array([])
+        if 'zlim' not in derived:
+            derived['zlim'] = np.array([])
 
         # compute LFS phi (toroidal flux in W/rad) grid from integrating q = d psi/d phi
         derived['phi'] = integrate.cumulative_trapezoid(derived['qpsi'],derived['psi'],initial=0)
