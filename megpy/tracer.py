@@ -222,7 +222,7 @@ def contour(X, Y, Z, level, kind='l',x_point=False):
     # compute a normalised level label for the contour level
     c['label'] = level
     # find the contour center quantities and add them to the contour dict
-    c.update(megpy.tracer.contour_center(c))
+    c.update(contour_center(c))
 
     # zipsort the contour from 0 - 2 pi
     c['theta_XY'] = arctan2pi(c['Y'] - c['Y0'], c['X'] - c['X0'])
