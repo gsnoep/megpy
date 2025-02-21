@@ -236,7 +236,7 @@ def contour(X, Y, Z, level, kind='l',x_point=False):
     return c
     #return segments
 
-def contour_center(c,tracer_diag='none'):
+def contour_center(c):
     """Find the geometric center of a contour trace c given by c['X'], c['Y'].
 
     Args:
@@ -267,7 +267,7 @@ def contour_center(c,tracer_diag='none'):
 
     return c
 
-def contour_extrema(c,tracer_diag='none'):
+def contour_extrema(c):
     """Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
 
     Args:
