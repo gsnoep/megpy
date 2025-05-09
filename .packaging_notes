@@ -1,6 +1,0 @@
-# For PyPI
-python -m pip install build twine
-python -m build
-twine check dist/*
-#twine upload -r testpypi dist/*
-twine upload dist/*

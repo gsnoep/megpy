@@ -554,6 +554,11 @@ class Equilibrium():
             derived['R0'] = bbbs_center['X0']
             derived['Z0'] = bbbs_center['Y0']
             derived['a'] = bbbs_center['r']
+        
+        if 'rlim' not in derived:
+            derived['rlim'] = np.array([])
+        if 'zlim' not in derived:
+            derived['zlim'] = np.array([])
 
         # compute LFS phi (toroidal flux in W/rad) grid from integrating q = d psi/d phi
         derived['phi'] = integrate.cumulative_trapezoid(derived['qpsi'],derived['psi'],initial=0)
@@ -595,7 +600,7 @@ class Equilibrium():
         else:
             return self
 
-    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,analytic_shape=False,incl_B=False,tracer_diag=None,verbose=False):
+    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,analytic_shape=False,incl_B=False,force_boundary=True,tracer_diag=None,verbose=False):
         """Add flux surfaces to an `Equilibrium`.
         
         Args:
@@ -684,7 +689,8 @@ class Equilibrium():
 
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
-                        fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
+                        #fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
+                        fs = tracer.contour(R,Z,psirz,psi_fs)
                         tracer_timing += time.time()-time0
                         fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
                         if x_label != 'rho_tor' and 'rho_tor' in derived:
@@ -770,7 +776,7 @@ class Equilibrium():
                     plt.show()
 
                 if not x:
-                    if 'rbbbs' in raw and 'zbbbs' in raw:
+                    if 'rbbbs' in raw and 'zbbbs' in raw and not force_boundary:
                         # find the geometric center, minor radius and extrema of the lcfs manually
                         lcfs = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
                         keys = copy.deepcopy(list(lcfs.keys()))
@@ -780,7 +786,8 @@ class Equilibrium():
                                 lcfs[_key] = lcfs.pop(key)
                         lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
                     else:
-                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
+                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],kind='s',x_point=True)
+                        #lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
                         keys = copy.deepcopy(list(lcfs.keys()))
                         for key in keys:
                             if 'X' in key or 'Y' in key:
