@@ -1,5 +1,5 @@
 """
-created by gsnoep on 13 August 2022
+created by gsnoep on 13 August 2022, with contributions from aho
 
 Module for tracing closed(!) contour lines in Z on a Y,X grid.
 """
@@ -182,44 +182,53 @@ def sort2d(x, y, centroid=None, start='farthest', metric='euclidean'):
     x_coordinates, y_coordinates = sorted_coords[:, 0], sorted_coords[:, 1] 
     return x_coordinates, y_coordinates
 
-def find_x_point(X,Y,Z,level):
-    dX = X[1] - X[0]
-    dY = Y[1] - Y[0]
+def segment2d(x, y, centroid=None, threshold=None, sort=True):
+    coordinates = np.column_stack((x, y))
+    distances = np.linalg.norm(np.diff(coordinates, axis=0), axis=1)
 
-    diff = np.abs((Z - level)) / (dX*dY)**2
+    if threshold is None:
+        median_distance = np.median(distances)
+        threshold = 2 * median_distance
+    
+    # segment the contours
+    segment_indices = np.where(distances > threshold)[0] + 1
+    if segment_indices.size > 0:
+        x_segments = np.array_split(x, segment_indices)
+        y_segments = np.array_split(y, segment_indices)
+    else:
+        x_segments = [x]
+        y_segments = [y]
+    segments = list(zip(x_segments, y_segments))
 
-    rows = np.where(np.any(diff < 1.05*np.min(diff), axis=1))[0]
-    cols = np.where(np.any(diff < 1.05*np.min(diff), axis=0))[0]
-    approx_nulls = list(product(cols, rows))  # (col, row) pairs
+    endpoints = [] 
+    dist = []
+    for i, (segment_x, segment_y) in enumerate(segments):
+        # close contour segments when the end is close to the start
+        segment = np.column_stack((segment_x, segment_y))
+        if np.linalg.norm(segment[-1] - segment[0], axis=0) <= threshold:
+            segment = np.vstack((segment, segment[0]))
+            segments[i] = (segment[:, 0], segment[:, 1])
 
-    interp_psi = interpolate.RectBivariateSpline(Y, X, Z, kx=3, ky=3)  # Cubic spline
-
-    def grad_psi(x, interp):
-        """Compute gradient at point x = [X, Y]"""
-        X_val, Y_val = x
-        dpsi_dX = interp.ev(Y_val, X_val, dx=1, dy=0)  # ∂ψ/∂R
-        dpsi_dY = interp.ev(Y_val, X_val, dx=0, dy=1)  # ∂ψ/∂Z
-        return np.array([dpsi_dX, dpsi_dY])
-
-    def objective(x, interp):
-        """Minimize |∇ψ|^2"""
-        grad = grad_psi(x, interp)
-        return np.sum(grad**2)
-
-    # Refine each approximate null
-    exact_rz = []
-    for col, row in approx_nulls:
-        r_guess = X[col]
-        z_guess = Y[row]
-        x0 = [r_guess, z_guess]
+        if sort:
+            if centroid is None:
+                centroid = np.array([np.mean(x),np.mean(y)])
+            mean_dist = np.mean(np.linalg.norm(segment - centroid, axis=1))
+            dist.append(mean_dist)
         
-        # Minimize |∇ψ|^2 starting from approximate point
-        result = optimize.minimize(objective, x0, args=(interp_psi,), method='L-BFGS-B',
-                        bounds=[(X.min(), X.max()), (Y.min(), Y.max())])
-        
-        if result.success and result.fun < 1e-6:  # Check if gradient is near zero
-            exact_rz.append((result.x[0], result.x[1]))
-    return exact_rz
+        # collect the endpoints of the segments
+        start = (segments[i][0][0], segments[i][0][1])
+        end = (segments[i][-1][0], segments[i][-1][1])
+        endpoints += [start, end]
+    
+    endpoints = np.array(endpoints)
+    # TODO: check pairwise if the endpoints are close to each other and merge segments within a threshold distance
+
+    # sort the segments by distance from the centroid
+    if sort:
+        i_sorted = np.argsort(dist)
+        segments = [segments[i] for i in i_sorted]
+
+    return segments
 
 def extract_segments(x_contours, y_contours, x_bounds, y_bounds, dx, dy, ref_point=None):
     # convert bounds to bounding boxes
@@ -266,6 +275,45 @@ def extract_segments(x_contours, y_contours, x_bounds, y_bounds, dx, dy, ref_poi
         return [segments[i] for i in i_sorted]
     else:
         return segments
+
+def find_x_point(X,Y,Z,level):
+    dX = X[1] - X[0]
+    dY = Y[1] - Y[0]
+
+    diff = np.abs((Z - level)) / (dX*dY)**2
+
+    rows = np.where(np.any(diff < 1.05*np.min(diff), axis=1))[0]
+    cols = np.where(np.any(diff < 1.05*np.min(diff), axis=0))[0]
+    approx_nulls = list(product(cols, rows))  # (col, row) pairs
+
+    interp_psi = interpolate.RectBivariateSpline(Y, X, Z, kx=3, ky=3)  # Cubic spline
+
+    def grad_psi(x, interp):
+        """Compute gradient at point x = [X, Y]"""
+        X_val, Y_val = x
+        dpsi_dX = interp.ev(Y_val, X_val, dx=1, dy=0)  # ∂ψ/∂R
+        dpsi_dY = interp.ev(Y_val, X_val, dx=0, dy=1)  # ∂ψ/∂Z
+        return np.array([dpsi_dX, dpsi_dY])
+
+    def objective(x, interp):
+        """Minimize |∇ψ|^2"""
+        grad = grad_psi(x, interp)
+        return np.sum(grad**2)
+
+    # Refine each approximate null
+    exact_rz = []
+    for col, row in approx_nulls:
+        r_guess = X[col]
+        z_guess = Y[row]
+        x0 = [r_guess, z_guess]
+        
+        # Minimize |∇ψ|^2 starting from approximate point
+        result = optimize.minimize(objective, x0, args=(interp_psi,), method='L-BFGS-B',
+                        bounds=[(X.min(), X.max()), (Y.min(), Y.max())])
+        
+        if result.success and result.fun < 1e-6:  # Check if gradient is near zero
+            exact_rz.append((result.x[0], result.x[1]))
+    return exact_rz
 
 def contour(X, Y, Z, level, kind='l',x_point=False):
     # compute the difference field
