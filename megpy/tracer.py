@@ -151,6 +151,37 @@ def intersect2d(x, y, z, indices, level, kind='l', axis='rows'):
     
     return x_values, y_values
 
+def sort2d(x, y, centroid=None, start='farthest', metric='euclidean'): 
+    coordinates = np.column_stack((x, y))  
+    n = len(coordinates)
+
+    if centroid is None:
+        centroid = np.mean(coordinates, axis=0)
+
+    # find starting point
+    l2_norm_centroid = np.linalg.norm(coordinates - centroid, axis=1)
+    i_start = np.argmax(l2_norm_centroid) if start == 'farthest' else np.argmin(l2_norm_centroid)
+
+    # compute pairwise distances
+    dist_matrix = spatial.distance.cdist(coordinates, coordinates, metric=metric)
+
+    # find nearest-neighbor sorting indices
+    sorted_indices = np.zeros(n, dtype=int)
+    used = np.zeros(n, dtype=bool)
+    sorted_indices[0] = i_start
+    used[i_start] = True
+
+    for i in range(1, n):
+        dists = dist_matrix[sorted_indices[i-1]]
+        dists[used] = np.inf
+        sorted_indices[i] = np.argmin(dists)
+        used[sorted_indices[i]] = True
+
+    # apply sorting indices
+    sorted_coords = coordinates[sorted_indices]
+    x_coordinates, y_coordinates = sorted_coords[:, 0], sorted_coords[:, 1] 
+    return x_coordinates, y_coordinates
+
 def find_x_point(X,Y,Z,level):
     dX = X[1] - X[0]
     dY = Y[1] - Y[0]
