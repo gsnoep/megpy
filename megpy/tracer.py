@@ -315,7 +315,59 @@ def find_x_point(X,Y,Z,level):
             exact_rz.append((result.x[0], result.x[1]))
     return exact_rz
 
-def contour(X, Y, Z, level, kind='l',x_point=False):
+def contour(X, Y, Z, level, kind='l', ref_point=None, x_point=False):
+    # compute the difference field
+    diff = Z - level
+
+    # identify intersections
+    rows = np.where(np.any(np.diff(np.sign(diff), axis=1) != 0, axis=1))[0]
+    cols = np.where(np.any(np.diff(np.sign(diff), axis=0) != 0, axis=0))[0]
+
+    # compute intersections
+    x_rows, y_rows = intersect2d(X, Y, Z, rows, level, kind=kind, axis='rows')
+    x_cols, y_cols = intersect2d(X, Y, Z, cols, level, kind=kind, axis='cols')
+
+    # concatenate coordinates
+    if x_rows.size > 0 or x_cols.size > 0:
+        x_coordinates = np.concatenate([x_rows, x_cols])
+        y_coordinates = np.concatenate([y_rows, y_cols])
+
+        dX = X[1] - X[0]
+        dY = Y[1] - Y[0]
+
+        if not x_point:
+            threshold = np.sqrt((1.5 * dX)**2 + (1.5 * dY)**2)
+        else:
+            threshold = np.sqrt((2. * dX)**2 + (2. * dY)**2)
+
+        x_coordinates, y_coordinates = sort2d(x_coordinates, y_coordinates, centroid=ref_point)
+        contours = segment2d(x_coordinates, y_coordinates, centroid=ref_point, threshold=threshold)
+
+    else:
+        x_coordinates = np.array([])
+        y_coordinates = np.array([])
+        
+        contours = [(x_coordinates, y_coordinates)]
+    
+    c = {'X':contours[0][0],'Y':contours[0][1],'level':level}
+    # compute a normalised level label for the contour level
+    c['label'] = level
+    # find the contour center quantities and add them to the contour dict
+    c.update(contour_center(c))
+
+    # zipsort the contour from 0 - 2 pi
+    c['theta_XY'] = arctan2pi(c['Y'] - c['Y0'], c['X'] - c['X0'])
+    c['theta_XY'], c['X'], c['Y'] = zipsort(c['theta_XY'], c['X'], c['Y'])
+
+    # close the contour
+    c['theta_XY'] = np.append(c['theta_XY'],c['theta_XY'][0])
+    c['X'] = np.append(c['X'],c['X'][0])
+    c['Y'] = np.append(c['Y'],c['Y'][0])
+
+    return c
+    #return contours
+
+def _contour(X, Y, Z, level, kind='l',x_point=False):
     # compute the difference field
     diff = Z - level
 
