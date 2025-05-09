@@ -4,22 +4,19 @@ created by gsnoep on 13 August 2022
 Module for tracing closed(!) contour lines in Z on a Y,X grid.
 """
 import numpy as np
-from scipy import interpolate,integrate
-import matplotlib.pyplot as plt
-from operator import itemgetter
-from .utils import *
 
-from scipy.interpolate import RectBivariateSpline
-from scipy.optimize import brentq,minimize
+from scipy import integrate, interpolate, optimize, spatial
 from itertools import product
 
-def find_inters1d(x, y, level, kind='l'):
+from .utils import *
+
+def intersect1d(x, y, y_val, kind='l'):
     if kind == 'l':
         # find sign changes (roots likely here)
-        sign_changes = np.where(np.diff(np.sign(y - level)))[0]
+        sign_changes = np.where(np.diff(np.sign(y - y_val)))[0]
         
         # linear interpolation function
-        def slice_interp(x_val):
+        def f_interp(x_val):
             return np.interp(x_val, x, y)
 
     elif kind == 's':
@@ -27,18 +24,132 @@ def find_inters1d(x, y, level, kind='l'):
         spline = interpolate.CubicSpline(x,y)
         
         # find sign changes in the spline (roots likely here)
-        sign_changes = np.where(np.diff(np.sign(spline(x) - level)))[0]
+        sign_changes = np.where(np.diff(np.sign(spline(x) - y_val)))[0]
 
         # spline interpolation function
-        def slice_interp(x_val):
+        def f_interp(x_val):
             return spline(x_val)
 
     else:
         raise ValueError("kind must be 'l' for linear or 's' for spline")
     
-    intersection_points = [brentq(lambda x_val: slice_interp(x_val) - level, x[i], x[i+1]) for i in sign_changes]
+    x_values = [brentq(lambda x_val: f_interp(x_val) - y_val, x[i], x[i+1]) for i in sign_changes]
 
-    return np.array(intersection_points)
+    return np.array(x_values)
+
+def intersect2d(x, y, z, indices, level, kind='l', axis='rows'):
+    """
+    Compute intersections of Z with level along rows or columns.
+    
+    Parameters:
+    - x, y: 1D arrays of x- and y-coordinates.
+    - Z: 2D array of values.
+    - indices: Array of row or column indices to process.
+    - level: Scalar value to find intersections with.
+    - kind: Interpolation type ('l' for linear, 's' for spline).
+    - axis: 'rows' to interpolate along X, 'cols' to interpolate along Y.
+
+    Returns:
+    - x_values, y_values: Arrays of x- and y-coordinates of intersections (sorted if sort=True).
+    """
+    # check if any rows/columns are selected
+    if len(indices) == 0:
+        return np.array([]), np.array([])
+    
+    # set data and coordinates based on axis
+    if axis == 'rows':
+        data = z[indices, :]  # shape: (len(indices), Z.shape[1])
+        interp_coords = x
+        fixed_coords = y[indices]
+        slice_axis = 1
+    elif axis == 'cols':
+        data = z[:, indices]  # shape: (Z.shape[0], len(indices))
+        interp_coords = y
+        fixed_coords = x[indices]
+        slice_axis = 0
+    else:
+        raise ValueError("axis must be 'rows' or 'cols'")
+
+    # find sign changes
+    sign_changes = np.diff(np.sign(data - level), axis=slice_axis) != 0
+    rows, cols = np.where(sign_changes)
+
+    # check if any intersections were found
+    if len(rows) == 0:
+        return np.array([]), np.array([])
+    
+    # linear interpolation
+    if kind == 'l':
+        # set coordinates based on axis
+        if axis == 'rows':
+            row_idx = indices[rows]
+            x0 = interp_coords[cols]
+            x1 = interp_coords[cols + 1]
+            y0 = z[row_idx, cols]
+            y1 = z[row_idx, cols + 1]
+        else:
+            col_idx = indices[cols]
+            x0 = interp_coords[rows]
+            x1 = interp_coords[rows + 1]
+            y0 = z[rows, col_idx]
+            y1 = z[rows + 1, col_idx]
+        
+        # interpolate
+        mask = y1 != y0
+        t = np.zeros_like(y0)
+        t[mask] = (level - y0[mask]) / (y1[mask] - y0[mask])
+        interp_values = x0 + t * (x1 - x0)
+
+        # process results
+        if axis == 'rows':
+            x_values = interp_values[mask]
+            y_values = fixed_coords[rows][mask]
+        else:
+            x_values = fixed_coords[cols][mask]
+            y_values = interp_values[mask]
+    
+    # spline interpolation  
+    elif kind == 's':
+        def process_slice(i, sign_changes_idx):
+            if axis == 'rows':
+                idx = indices[i]
+                slice_data = z[idx, :]
+                slice_coords = fixed_coords[i]
+            else:
+                idx = indices[i]
+                slice_data = z[:, idx]
+                slice_coords = fixed_coords[i]
+            
+            spline = interpolate.CubicSpline(interp_coords, slice_data)
+            x_vals, y_vals = [], []
+            for i_sign in sign_changes_idx:
+                c0, c1 = interp_coords[i_sign], interp_coords[i_sign + 1]
+                try:
+                    root = optimize.brentq(lambda x: spline(x) - level, c0, c1)
+                    if axis == 'rows':
+                        x_vals.append(root)
+                        y_vals.append(slice_coords)
+                    else:
+                        x_vals.append(slice_coords)
+                        y_vals.append(root)
+                except ValueError:
+                    continue
+            return x_vals, y_vals
+        
+        if axis == 'rows':
+            unique_idx = np.unique(rows)
+            results = [process_slice(i, cols[rows == i]) for i in range(len(indices)) if i in unique_idx]
+        else:
+            unique_idx = np.unique(cols)
+            results = [process_slice(i, rows[cols == i]) for i in range(len(indices)) if i in unique_idx]
+        
+        x_values = np.concatenate([_x for _x, _ in results]) if results else np.array([])
+        y_values = np.concatenate([_y for _, _y in results]) if results else np.array([])
+    
+    else:
+        raise ValueError("kind must be 'l' (linear) or 's' (spline)")
+    
+    return x_values, y_values
 
 def find_x_point(X,Y,Z,level):
     dX = X[1] - X[0]
@@ -50,7 +161,7 @@ def find_x_point(X,Y,Z,level):
     cols = np.where(np.any(diff < 1.05*np.min(diff), axis=0))[0]
     approx_nulls = list(product(cols, rows))  # (col, row) pairs
 
-    interp_psi = RectBivariateSpline(Y, X, Z, kx=3, ky=3)  # Cubic spline
+    interp_psi = interpolate.RectBivariateSpline(Y, X, Z, kx=3, ky=3)  # Cubic spline
 
     def grad_psi(x, interp):
         """Compute gradient at point x = [X, Y]"""
@@ -72,7 +183,7 @@ def find_x_point(X,Y,Z,level):
         x0 = [r_guess, z_guess]
         
         # Minimize |∇ψ|^2 starting from approximate point
-        result = minimize(objective, x0, args=(interp_psi,), method='L-BFGS-B',
+        result = optimize.minimize(objective, x0, args=(interp_psi,), method='L-BFGS-B',
                         bounds=[(X.min(), X.max()), (Y.min(), Y.max())])
         
         if result.success and result.fun < 1e-6:  # Check if gradient is near zero
@@ -135,7 +246,7 @@ def contour(X, Y, Z, level, kind='l',x_point=False):
 
     if np.any(rows):
         # compute the coordinates of the intersections in the identified rows
-        x_fs_rows = [find_inters1d(X, Z[row, :], level, kind=kind) for row in rows]
+        x_fs_rows = [intersect1d(X, Z[row, :], level, kind=kind) for row in rows]
         y_fs_rows = [[Y[row]] * len(x_fs_rows[i_row]) for i_row,row in enumerate(rows)]
 
         # compute the vertical edges of the segment bounding boxes
@@ -152,7 +263,7 @@ def contour(X, Y, Z, level, kind='l',x_point=False):
     
     if np.any(cols):
         # compute the coordinates of the intersections in the identified columns
-        y_fs_cols = [find_inters1d(Y, Z[:, col], level, kind=kind) for col in cols]
+        y_fs_cols = [intersect1d(Y, Z[:, col], level, kind=kind) for col in cols]
         x_fs_cols = [[X[col]] * len(y_fs_cols[i_col]) for i_col,col in enumerate(cols)]
         
         # compute the horizontal edges of the segment bounding boxes
