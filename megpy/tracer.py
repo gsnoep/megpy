@@ -33,7 +33,7 @@ def intersect1d(x, y, y_val, kind='l'):
     else:
         raise ValueError("kind must be 'l' for linear or 's' for spline")
     
-    x_values = [brentq(lambda x_val: f_interp(x_val) - y_val, x[i], x[i+1]) for i in sign_changes]
+    x_values = [optimize.brentq(lambda x_val: f_interp(x_val) - y_val, x[i], x[i+1]) for i in sign_changes]
 
     return np.array(x_values)
 
