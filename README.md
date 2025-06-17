@@ -5,7 +5,7 @@ It offers both a command line interface (CLI) and Python API.
 # Getting started
 To get MEGPy clone and install the latest version:
 ```bash
-$ git clone git@github.com:gsnoep/megpy.git
+$ git clone https://github.com/gsnoep/megpy.git
 $ cd megpy
 $ pip install --user -e .
 ```
