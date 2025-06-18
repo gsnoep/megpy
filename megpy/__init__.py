@@ -1,11 +1,12 @@
 import sys
-from pkg_resources import (
-    DistributionNotFound as _DistributionNotFound,
-    get_distribution as _get_distribution,
-)
+try:
+    from importlib.metadata import version, PackageNotFoundError
+except ImportError:
+    # For Python <3.8, use the backport
+    from importlib_metadata import version, PackageNotFoundError
 
-if sys.version_info < (3,7):
-    raise Exception("MEGPy does not support Python < 3.7")
+if sys.version_info < (3,8):
+    raise Exception("megpy does not support Python < 3.8")
 
 from .equilibrium import Equilibrium
 from .localequilibrium import LocalEquilibrium
@@ -18,7 +19,6 @@ __all__= [
 ]
 
 try:
-    _distribution = _get_distribution("megpy")
-    __version__ = _distribution.version
-except _DistributionNotFound:
-    __version__ = "unknown"
+    __version__ = version('megpy')
+except PackageNotFoundError:
+    __version__ = 'unknown'
