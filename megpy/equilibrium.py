@@ -984,10 +984,111 @@ class Equilibrium():
 
         return self
 
-    def plot_derived(self,):
-
-        return self
+    def plot_derived(self, figsize=(12, 8), save_path=None):
+        """Plot derived quantities from the equilibrium
+        
+        Args:
+            figsize (tuple): Figure size (width, height)
+            save_path (str, optional): Path to save the figure
+            
+        Returns:
+            matplotlib.figure.Figure: The created figure
+        """
+        if not self.derived:
+            print("No derived quantities available. Run add_derived() first.")
+            return None
+            
+        fig, axes = plt.subplots(2, 2, figsize=figsize)
+        fig.suptitle('Equilibrium Derived Quantities', fontsize=16)
+        
+        # Plot safety factor
+        axes[0, 0].plot(self.derived['rho_pol'], self.raw['qpsi'], 'b-', linewidth=2)
+        axes[0, 0].set_xlabel('ρ_pol')
+        axes[0, 0].set_ylabel('q (Safety Factor)')
+        axes[0, 0].set_title('Safety Factor Profile')
+        axes[0, 0].grid(True, alpha=0.3)
+        
+        # Plot pressure
+        axes[0, 1].plot(self.derived['rho_pol'], self.raw['pres'], 'g-', linewidth=2)
+        axes[0, 1].set_xlabel('ρ_pol')
+        axes[0, 1].set_ylabel('Pressure [Pa]')
+        axes[0, 1].set_title('Pressure Profile')
+        axes[0, 1].grid(True, alpha=0.3)
+        
+        # Plot toroidal field function
+        axes[1, 0].plot(self.derived['rho_pol'], self.raw['fpol'], 'm-', linewidth=2)
+        axes[1, 0].set_xlabel('ρ_pol')
+        axes[1, 0].set_ylabel('F = RB_tor [T⋅m]')
+        axes[1, 0].set_title('Toroidal Field Function')
+        axes[1, 0].grid(True, alpha=0.3)
+        
+        # Plot current density components
+        if 'j_tor' in self.derived:
+            axes[1, 1].plot(self.derived['rho_pol'], self.derived['j_tor'], 'r-', linewidth=2)
+            axes[1, 1].set_xlabel('ρ_pol')
+            axes[1, 1].set_ylabel('J_tor [A/m²]')
+            axes[1, 1].set_title('Toroidal Current Density')
+            axes[1, 1].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+            
+        return fig
     
-    def plot_fluxsurfaces(self,):
-
-        return self
+    def plot_fluxsurfaces(self, figsize=(10, 8), n_contours=20, save_path=None):
+        """Plot flux surfaces and equilibrium geometry
+        
+        Args:
+            figsize (tuple): Figure size (width, height)
+            n_contours (int): Number of flux surface contours to plot
+            save_path (str, optional): Path to save the figure
+            
+        Returns:
+            matplotlib.figure.Figure: The created figure
+        """
+        if not self.derived:
+            print("No derived quantities available. Run add_derived() first.")
+            return None
+            
+        fig, ax = plt.subplots(figsize=figsize)
+        
+        # Create meshgrid for contour plotting
+        R_mesh, Z_mesh = np.meshgrid(self.derived['R'], self.derived['Z'])
+        
+        # Plot psi contours
+        levels = np.linspace(self.raw['simag'], self.raw['sibry'], n_contours)
+        contours = ax.contour(R_mesh, Z_mesh, self.derived['psirz'], levels=levels, colors='blue', alpha=0.7)
+        contourf = ax.contourf(R_mesh, Z_mesh, self.derived['psirz'], levels=levels, alpha=0.3, cmap='viridis')
+        
+        # Add colorbar
+        cbar = plt.colorbar(contourf, ax=ax)
+        cbar.set_label('ψ [Wb/rad]')
+        
+        # Plot boundary if available
+        if 'rbbbs' in self.raw and 'zbbbs' in self.raw:
+            ax.plot(self.raw['rbbbs'], self.raw['zbbbs'], 'r-', linewidth=2, label='LCFS')
+        
+        # Plot limiter if available
+        if 'rlim' in self.raw and 'zlim' in self.raw:
+            ax.plot(self.raw['rlim'], self.raw['zlim'], 'k-', linewidth=2, label='Limiter')
+        
+        # Mark magnetic axis
+        ax.plot(self.raw['rmaxis'], self.raw['zmaxis'], 'ro', markersize=8, label='Magnetic Axis')
+        
+        # Mark X-point if available
+        if 'R_x' in self.derived and 'Z_x' in self.derived:
+            ax.plot(self.derived['R_x'], self.derived['Z_x'], 'rx', markersize=10, label='X-point')
+        
+        ax.set_xlabel('R [m]')
+        ax.set_ylabel('Z [m]')
+        ax.set_title('Flux Surfaces (ψ contours)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        ax.set_aspect('equal')
+        
+        if save_path:
+            fig.savefig(save_path, dpi=300, bbox_inches='tight')
+            
+        return fig
