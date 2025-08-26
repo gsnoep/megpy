@@ -1,12 +1,11 @@
 """
 created by gsnoep on 13 August 2022, with contributions from aho
 
-Module for tracing closed(!) contour lines in Z on a Y,X grid.
+Module for tracing contour lines for level in field on a y, x grid.
 """
 import numpy as np
 
 from scipy import integrate, interpolate, optimize, spatial
-from itertools import product
 
 from .utils import *
 
@@ -37,335 +36,287 @@ def intersect1d(x, y, y_val, kind='l'):
 
     return np.array(x_values)
 
-def intersect2d(x, y, z, indices, level, kind='l', axis='rows'):
+def intersect2d(x, y, field, level, axis=0, indices=None, kind='l'):
     """
-    Compute intersections of Z with level along rows or columns.
-    
+    Vectorized calculation of intersections of a 2D array with a level along rows (axis = 1) or columns (axis = 0).
+
     Parameters:
     - x, y: 1D arrays of x- and y-coordinates.
-    - Z: 2D array of values.
-    - indices: Array of row or column indices to process.
+    - field: 2D array of values.
     - level: Scalar value to find intersections with.
+    - axis: 0 to interpolate along y, 1 to interpolate along x.
+    - indices: Array of row or column indices to process (default: all).
     - kind: Interpolation type ('l' for linear, 's' for spline).
-    - axis: 'rows' to interpolate along X, 'cols' to interpolate along Y.
 
     Returns:
-    - x_values, y_values: Arrays of x- and y-coordinates of intersections (sorted if sort=True).
+    - x_values, y_values: Arrays of x- and y-coordinates of intersections.
     """
-    # check if any rows/columns are selected
-    if len(indices) == 0:
-        return np.array([]), np.array([])
-    
-    # set data and coordinates based on axis
-    if axis == 'rows':
-        data = z[indices, :]  # shape: (len(indices), Z.shape[1])
-        interp_coords = x
-        fixed_coords = y[indices]
-        slice_axis = 1
-    elif axis == 'cols':
-        data = z[:, indices]  # shape: (Z.shape[0], len(indices))
-        interp_coords = y
-        fixed_coords = x[indices]
-        slice_axis = 0
-    else:
-        raise ValueError("axis must be 'rows' or 'cols'")
+    # input validation
+    x, y, field = np.asarray(x), np.asarray(y), np.asarray(field)
+    if x.ndim != 1 or y.ndim != 1 or field.ndim != 2:
+        raise ValueError("x and y must be 1D, field must be 2D")
+    if not (x.size == field.shape[1] and y.size == field.shape[0]):
+        raise ValueError("x and y must match field dimensions")
+    if axis not in [0, 1]:
+        raise ValueError("axis must be 0 or 1")
+    if kind not in ['l', 's']:
+        raise ValueError("kind must be 'l' (linear) or 's' (spline)")
+
+    # specify indices
+    indices = np.arange(field.shape[1] if axis == 0 else field.shape[0]) if indices is None else np.asarray(indices)
+    if indices.ndim != 1 or indices.size == 0:
+        raise ValueError("indices must be a non-empty 1D array")
+
+    # transpose data if axis=1
+    if axis == 1:
+        field = field.T
+        x, y = y, x
+
+    # select data and coordinates
+    data = field[:, indices]
+    interp_coords = y
+    fixed_coords = x[indices]
 
     # find sign changes
-    sign_changes = np.diff(np.sign(data - level), axis=slice_axis) != 0
+    sign_changes = np.diff(np.sign(data - level), axis=0) != 0
     rows, cols = np.where(sign_changes)
 
-    # check if any intersections were found
+    # check if any intersections are found
     if len(rows) == 0:
         return np.array([]), np.array([])
-    
+
     # linear interpolation
     if kind == 'l':
-        # set coordinates based on axis
-        if axis == 'rows':
-            row_idx = indices[rows]
-            x0 = interp_coords[cols]
-            x1 = interp_coords[cols + 1]
-            y0 = z[row_idx, cols]
-            y1 = z[row_idx, cols + 1]
-        else:
-            col_idx = indices[cols]
-            x0 = interp_coords[rows]
-            x1 = interp_coords[rows + 1]
-            y0 = z[rows, col_idx]
-            y1 = z[rows + 1, col_idx]
-        
-        # interpolate
-        mask = y1 != y0
-        t = np.zeros_like(y0)
-        t[mask] = (level - y0[mask]) / (y1[mask] - y0[mask])
-        interp_values = x0 + t * (x1 - x0)
+        x0 = interp_coords[rows]
+        x1 = interp_coords[rows + 1]
+        y0 = data[rows, cols]
+        y1 = data[rows + 1, cols]
 
-        # process results
-        if axis == 'rows':
-            x_values = interp_values[mask]
-            y_values = fixed_coords[rows][mask]
-        else:
-            x_values = fixed_coords[cols][mask]
-            y_values = interp_values[mask]
-    
-    # spline interpolation  
+        with np.errstate(divide='ignore', invalid='ignore'):
+            t = (level - y0) / (y1 - y0)
+            mask = (y1 != y0) & (t >= 0) & (t <= 1)
+            interp_values = x0 + t * (x1 - x0)
+
+        x_values = fixed_coords[cols][mask]
+        y_values = interp_values[mask]
+
+    # spline interpolation
     elif kind == 's':
-        def process_slice(i, sign_changes_idx):
-            if axis == 'rows':
-                idx = indices[i]
-                slice_data = z[idx, :]
-                slice_coords = fixed_coords[i]
-            else:
-                idx = indices[i]
-                slice_data = z[:, idx]
-                slice_coords = fixed_coords[i]
-            
+        x_values, y_values = [], []
+        unique_cols = np.unique(cols)
+        for col_idx in unique_cols:
+            idx = indices[col_idx]
+            slice_data = data[:, col_idx]
+            row_indices = rows[cols == col_idx]
+
+            # create spline
             spline = interpolate.CubicSpline(interp_coords, slice_data)
-            x_vals, y_vals = [], []
-            for i_sign in sign_changes_idx:
-                c0, c1 = interp_coords[i_sign], interp_coords[i_sign + 1]
+
+            # process each sign change
+            for i in row_indices:
+                c0, c1 = interp_coords[i], interp_coords[i + 1]
                 try:
                     root = optimize.brentq(lambda x: spline(x) - level, c0, c1)
-                    if axis == 'rows':
-                        x_vals.append(root)
-                        y_vals.append(slice_coords)
-                    else:
-                        x_vals.append(slice_coords)
-                        y_vals.append(root)
+                    x_values.append(fixed_coords[col_idx])
+                    y_values.append(root)
                 except ValueError:
                     continue
-            return x_vals, y_vals
-        
-        if axis == 'rows':
-            unique_idx = np.unique(rows)
-            results = [process_slice(i, cols[rows == i]) for i in range(len(indices)) if i in unique_idx]
-        else:
-            unique_idx = np.unique(cols)
-            results = [process_slice(i, rows[cols == i]) for i in range(len(indices)) if i in unique_idx]
-        
-        x_values = np.concatenate([_x for _x, _ in results]) if results else np.array([])
-        y_values = np.concatenate([_y for _, _y in results]) if results else np.array([])
     
-    else:
-        raise ValueError("kind must be 'l' (linear) or 's' (spline)")
-    
+    x_values = np.array(x_values)
+    y_values = np.array(y_values)
+
+    # account for axis
+    if axis == 1:
+        x_values, y_values = y_values, x_values
+
     return x_values, y_values
 
-def sort2d(x, y, centroid=None, start='farthest', metric='euclidean'): 
-    coordinates = np.column_stack((x, y))  
-    n = len(coordinates)
+def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='euclidean', x_point=False):
+    """
+    Sort 2D points based on nearest-neighbor traversal, splitting into separate segments
+    when the next nearest neighbor is further than the threshold.
 
-    if centroid is None:
-        centroid = np.mean(coordinates, axis=0)
+    Parameters:
+    - x, y: 1D arrays of x- and y-coordinates.
+    - ref_point: Reference point for starting (default: mean of coordinates).
+    - threshold: Distance threshold for segment splitting (default: 2 * median distance).
+    - start: 'farthest' or 'closest' to ref_point (default: 'farthest').
+    - metric: Distance metric for cdist (default: 'euclidean').
 
-    # find starting point
-    l2_norm_centroid = np.linalg.norm(coordinates - centroid, axis=1)
-    i_start = np.argmax(l2_norm_centroid) if start == 'farthest' else np.argmin(l2_norm_centroid)
+    Returns:
+    - segments: List of tuples, each containing (x_coords, y_coords) for a segment.
+    """
+
+    # input validation
+    x, y = np.asarray(x), np.asarray(y)
+    if x.shape != y.shape or x.ndim != 1:
+        raise ValueError("x and y must be 1D arrays of equal length")
+    coordinates = np.column_stack((x, y))
+    
+    # set default threshold based on median distance between consecutive points
+    if threshold is None:
+        distances = np.linalg.norm(np.diff(coordinates, axis=0), axis=1)
+        median_distance = np.median(distances) if len(distances) > 0 else 1.0
+        threshold = 2 * median_distance
+    
+    if start not in ['farthest', 'closest']:
+        raise ValueError("start must be 'farthest' or 'closest'")
+    
+    ref_point = np.mean(coordinates, axis=0) if ref_point is None else np.asarray(ref_point)
 
     # compute pairwise distances
     dist_matrix = spatial.distance.cdist(coordinates, coordinates, metric=metric)
-
-    # find nearest-neighbor sorting indices
-    sorted_indices = np.zeros(n, dtype=int)
+    
+    n = len(coordinates)
     used = np.zeros(n, dtype=bool)
-    sorted_indices[0] = i_start
-    used[i_start] = True
+    segments = []
 
-    for i in range(1, n):
-        dists = dist_matrix[sorted_indices[i-1]]
-        dists[used] = np.inf
-        sorted_indices[i] = np.argmin(dists)
-        used[sorted_indices[i]] = True
-
-    # apply sorting indices
-    sorted_coords = coordinates[sorted_indices]
-    x_coordinates, y_coordinates = sorted_coords[:, 0], sorted_coords[:, 1] 
-    return x_coordinates, y_coordinates
-
-def segment2d(x, y, centroid=None, threshold=None, sort=True):
-    coordinates = np.column_stack((x, y))
-    distances = np.linalg.norm(np.diff(coordinates, axis=0), axis=1)
-
-    if threshold is None:
-        median_distance = np.median(distances)
-        threshold = 2 * median_distance
-    
-    # segment the contours
-    segment_indices = np.where(distances > threshold)[0] + 1
-    if segment_indices.size > 0:
-        x_segments = np.array_split(x, segment_indices)
-        y_segments = np.array_split(y, segment_indices)
-    else:
-        x_segments = [x]
-        y_segments = [y]
-    segments = list(zip(x_segments, y_segments))
-
-    endpoints = [] 
-    dist = []
-    for i, (segment_x, segment_y) in enumerate(segments):
-        # close contour segments when the end is close to the start
-        segment = np.column_stack((segment_x, segment_y))
-        if np.linalg.norm(segment[-1] - segment[0], axis=0) <= threshold:
-            segment = np.vstack((segment, segment[0]))
-            segments[i] = (segment[:, 0], segment[:, 1])
-
-        if sort:
-            if centroid is None:
-                centroid = np.array([np.mean(x),np.mean(y)])
-            mean_dist = np.mean(np.linalg.norm(segment - centroid, axis=1))
-            dist.append(mean_dist)
+    while not all(used):
+        # find starting point for a segment
+        l2_norm_ref = np.linalg.norm(coordinates - ref_point, axis=1)
+        l2_norm_ref[used] = np.inf if start == 'closest' else -np.inf
+        i_start = np.argmin(l2_norm_ref) if start == 'closest' else np.argmax(l2_norm_ref)
         
-        # collect the endpoints of the segments
-        start = (segments[i][0][0], segments[i][0][1])
-        end = (segments[i][-1][0], segments[i][-1][1])
-        endpoints += [start, end]
+        # initialize new segment
+        segment_indices = [i_start]
+        used[i_start] = True
+        
+        # construct segment using nearest neighbor
+        while True:
+            current_idx = segment_indices[-1]
+            dists = dist_matrix[current_idx].copy()
+            dists[used] = np.inf
+            dists[dists == 0] = np.inf  # exclude duplicate points (zero distance)
+            next_idx = np.argmin(dists)
+            
+            # check if all points are used or if the next point is too far
+            if dists[next_idx] == np.inf or dists[next_idx] > threshold:
+                break
+                
+            segment_indices.append(next_idx)
+            used[next_idx] = True
+        
+        # store segment coordinates
+        segment_coords = coordinates[segment_indices]
+        segments.append((segment_coords[:, 0], segment_coords[:, 1]))
     
-    endpoints = np.array(endpoints)
-    # TODO: check pairwise if the endpoints are close to each other and merge segments within a threshold distance
-
-    # sort the segments by distance from the centroid
-    if sort:
-        i_sorted = np.argsort(dist)
-        segments = [segments[i] for i in i_sorted]
-
+    # close contour segments when the end is close to the start
+    if segments:
+        #if x_point:
+            # case 1, segment self-intersects, a coordinate is repeated later in the sequence, 
+            # implementation: 1. check if any point in a segment is duplicated, 2. split the segment into two, 3. connect the part of the segment before the first occurrence to the part after the second occurrence (including this point) and leave the part between the two points in place. 
+            # case 2, segments share points, but don't connect, 
+            
+        # extract first and last points for all segments
+        first_points = np.array([seg[0][0] for seg in segments])
+        last_points = np.array([seg[0][-1] for seg in segments])
+        first_coords = np.array([np.array([seg[0][0], seg[1][0]]) for seg in segments])
+        last_coords = np.array([np.array([seg[0][-1], seg[1][-1]]) for seg in segments])
+        
+        # compute distances between first and last points
+        distances = np.linalg.norm(last_coords - first_coords, axis=1)
+        
+        # identify segments to close: distance <= threshold and not identical
+        to_close = (distances <= threshold) & (first_points != last_points)
+        
+        # update segments: close those that meet the condition
+        segments = [
+            (np.append(seg[0], seg[0][0]) if to_close[i] else seg[0],
+             np.append(seg[1], seg[1][0]) if to_close[i] else seg[1])
+            for i, seg in enumerate(segments)
+        ]
+    
     return segments
 
-def extract_segments(x_contours, y_contours, x_bounds, y_bounds, dx, dy, ref_point=None):
-    # convert bounds to bounding boxes
-    x_boxes = list(zip(x_bounds[0::2], x_bounds[1::2]))
-    y_boxes = list(zip(y_bounds[0::2], y_bounds[1::2]))
+def find_x_point(x, y, z, level):
+    dx = x[1] - x[0]
+    dy = y[1] - y[0]
 
-    x_contours = np.asarray(x_contours)
-    y_contours = np.asarray(y_contours)
+    diff = np.abs((z - level)) / (dx*dy)**2
 
-    # check for NaN or Inf in contour data
-    if np.isnan(x_contours).any() or np.isnan(y_contours).any() or np.isinf(x_contours).any() or np.isinf(y_contours).any():
-        print("Warning: Contour data contains NaN or Inf values")
+    # Find indices of points where diff is close to its minimum
+    threshold = 1.05 * np.min(diff)
+    indices = np.where(diff < threshold)
+    approx_nulls = list(zip(indices[1], indices[0]))  # (col, row) pairs
 
-    # split the contour coordinates into separate segments based on the bounding boxes
-    segments = []
-    for (x_min, x_max), (y_min, y_max) in product(x_boxes, y_boxes):
-        mask = (
-            (x_contours >= x_min) & (x_contours <= x_max) & 
-            (y_contours >= y_min) & (y_contours <= y_max)
-        )
-
-        if np.any(mask): # exclude empty bounding boxes
-            segments.append((x_contours[mask], y_contours[mask]))
-        
-        # print for debugging
-            #print(f"Found points for box: x[{x_min}, {x_max}], y[{y_min}, {y_max}]")
-        #else:
-            #print(f"No points found for box: x[{x_min}, {x_max}], y[{y_min}, {y_max}]")
-    
-    #for i_seg, segment in enumerate(segments):
-    #    if np.abs(segment[0][-1]-segment[0][0]) < dx or np.abs(segment[1][-1]-segment[1][0]):
-    #        segments[i_seg] = (np.concatenate((segment[0], [segment[0][0]])),np.concatenate((segment[1], [segment[1][0]])))
-    
-    # sort the contour segments by distance from a reference point, if one is provided
-    if len(segments) > 1 and ref_point:
-        distance = []
-        for segment_x, segment_y in segments:
-            points = np.column_stack((segment_x, segment_y))
-            mean_dist = np.mean(np.linalg.norm(points - ref_point, axis=1))
-            distance.append(mean_dist)
-        # sort the indices
-        i_sorted = np.argsort(distance)
-        
-        return [segments[i] for i in i_sorted]
-    else:
-        return segments
-
-def find_x_point(X,Y,Z,level):
-    dX = X[1] - X[0]
-    dY = Y[1] - Y[0]
-
-    diff = np.abs((Z - level)) / (dX*dY)**2
-
-    rows = np.where(np.any(diff < 1.05*np.min(diff), axis=1))[0]
-    cols = np.where(np.any(diff < 1.05*np.min(diff), axis=0))[0]
-    approx_nulls = list(product(cols, rows))  # (col, row) pairs
-
-    interp_psi = interpolate.RectBivariateSpline(Y, X, Z, kx=3, ky=3)  # Cubic spline
+    interp_psi = interpolate.RectBivariateSpline(y, x, z, kx=3, ky=3)  # Cubic spline
 
     def grad_psi(x, interp):
-        """Compute gradient at point x = [X, Y]"""
-        X_val, Y_val = x
-        dpsi_dX = interp.ev(Y_val, X_val, dx=1, dy=0)  # ∂ψ/∂R
-        dpsi_dY = interp.ev(Y_val, X_val, dx=0, dy=1)  # ∂ψ/∂Z
-        return np.array([dpsi_dX, dpsi_dY])
+        """
+        Compute gradient at point x = [r_val, z_val]
+        """
+        r_val, z_val = x
+        dpsi_dr = interp.ev(z_val, r_val, dx=1, dy=0)
+        dpsi_dz = interp.ev(z_val, r_val, dx=0, dy=1)
+        return np.array([dpsi_dr, dpsi_dz])
 
     def objective(x, interp):
-        """Minimize |∇ψ|^2"""
+        """
+        Minimize |∇ψ|^2
+        """
         grad = grad_psi(x, interp)
         return np.sum(grad**2)
 
     # Refine each approximate null
     exact_rz = []
     for col, row in approx_nulls:
-        r_guess = X[col]
-        z_guess = Y[row]
+        r_guess = x[col]
+        z_guess = y[row]
         x0 = [r_guess, z_guess]
         
         # Minimize |∇ψ|^2 starting from approximate point
         result = optimize.minimize(objective, x0, args=(interp_psi,), method='L-BFGS-B',
-                        bounds=[(X.min(), X.max()), (Y.min(), Y.max())])
+                        bounds=[(x.min(), x.max()), (y.min(), y.max())])
         
         if result.success and result.fun < 1e-6:  # Check if gradient is near zero
             exact_rz.append((result.x[0], result.x[1]))
-    return exact_rz
+    
+    return np.array(exact_rz)
 
-def contour(X, Y, Z, level, kind='l', ref_point=None, x_point=False):
+def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
     # compute the difference field
-    diff = Z - level
+    diff = field - level
 
     # identify intersections
     rows = np.where(np.any(np.diff(np.sign(diff), axis=1) != 0, axis=1))[0]
     cols = np.where(np.any(np.diff(np.sign(diff), axis=0) != 0, axis=0))[0]
 
     # compute intersections
-    x_rows, y_rows = intersect2d(X, Y, Z, rows, level, kind=kind, axis='rows')
-    x_cols, y_cols = intersect2d(X, Y, Z, cols, level, kind=kind, axis='cols')
+    x_rows, y_rows = intersect2d(x, y, field, level, axis=1, indices=rows, kind=kind)
+    x_cols, y_cols = intersect2d(x, y, field, level, axis=0, indices=cols, kind=kind)
 
     # concatenate coordinates
     if x_rows.size > 0 or x_cols.size > 0:
         x_coordinates = np.concatenate([x_rows, x_cols])
         y_coordinates = np.concatenate([y_rows, y_cols])
 
-        dX = X[1] - X[0]
-        dY = Y[1] - Y[0]
+        dx = x[1] - x[0]
+        dy = y[1] - y[0]
 
-        if not x_point:
-            threshold = np.sqrt((1.5 * dX)**2 + (1.5 * dY)**2)
-        else:
-            threshold = np.sqrt((2. * dX)**2 + (2. * dY)**2)
+        threshold = np.sqrt((1.5 * dx)**2 + (1.5 * dy)**2)
 
-        x_coordinates, y_coordinates = sort2d(x_coordinates, y_coordinates, centroid=ref_point)
-        contours = segment2d(x_coordinates, y_coordinates, centroid=ref_point, threshold=threshold)
+        if x_point:
+            x_points = find_x_point(x, y, field,level)
+
+            # Compute grid spacing and radius
+            radius = np.sqrt((1. * dx)**2 + (1. * dy)**2)
+
+            for _x_point in x_points:
+                distances = np.sqrt((x_coordinates-_x_point[0])**2+(y_coordinates-_x_point[1])**2)
+                mask = distances > radius
+                x_coordinates = np.concatenate([x_coordinates[mask],np.repeat(_x_point[0],2)])
+                y_coordinates = np.concatenate([y_coordinates[mask],np.repeat(_x_point[1],2)])
+
+        contours = sort2d(x_coordinates, y_coordinates, ref_point, threshold, x_point=x_point)
+        #contours = [(x_coordinates, y_coordinates)]
 
     else:
         x_coordinates = np.array([])
         y_coordinates = np.array([])
         
         contours = [(x_coordinates, y_coordinates)]
-    
-    c = {'X':contours[0][0],'Y':contours[0][1],'level':level}
-    # compute a normalised level label for the contour level
-    c['label'] = level
-    # find the contour center quantities and add them to the contour dict
-    c.update(contour_center(c))
 
-    # zipsort the contour from 0 - 2 pi
-    c['theta_XY'] = arctan2pi(c['Y'] - c['Y0'], c['X'] - c['X0'])
-    c['theta_XY'], c['X'], c['Y'] = zipsort(c['theta_XY'], c['X'], c['Y'])
-
-    # close the contour
-    c['theta_XY'] = np.append(c['theta_XY'],c['theta_XY'][0])
-    c['X'] = np.append(c['X'],c['X'][0])
-    c['Y'] = np.append(c['Y'],c['Y'][0])
-
-    return c
-    #return contours
+    return contours
 
 def contour_center(c):
     """Find the geometric center of a contour trace c given by c['X'], c['Y'].
@@ -410,13 +361,12 @@ def contour_extrema(c):
     Returns:
         (dict): the contour with the extrema information added
     """
-    #print('bah')
     # restack R_fs and Z_fs to get a continuous midplane outboard trace
-    X_out = np.hstack((c['X'][int(0.9*len(c['Y'])):],c['X'][:int(0.1*len(c['Y']))]))
-    Y_out = np.hstack((c['Y'][int(0.9*len(c['Y'])):],c['Y'][:int(0.1*len(c['Y']))]))
-
     X_in = c['X'][int(len(c['Y'])/2)-int(0.1*len(c['Y'])):int(len(c['Y'])/2)+int(0.1*len(c['Y']))]
+    X_out = np.hstack((c['X'][int(0.9*len(c['Y'])):],c['X'][:int(0.1*len(c['Y']))]))
+    
     Y_in = c['Y'][int(len(c['Y'])/2)-int(0.1*len(c['Y'])):int(len(c['Y'])/2)+int(0.1*len(c['Y']))]
+    Y_out = np.hstack((c['Y'][int(0.9*len(c['Y'])):],c['Y'][:int(0.1*len(c['Y']))]))
 
     # find the approximate(!) extrema in Y of the contour
     Y_max = np.max(c['Y'])
