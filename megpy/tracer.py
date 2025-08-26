@@ -1,7 +1,7 @@
 """
 created by gsnoep on 13 August 2022, with contributions from aho
 
-Module for tracing contour lines for level in field on a y, x grid.
+Module for tracing contour lines for level in field on a y,x grid.
 """
 import numpy as np
 
@@ -228,50 +228,272 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
     
     return segments
 
-def find_x_point(x, y, z, level):
-    dx = x[1] - x[0]
-    dy = y[1] - y[0]
+def find_nulls(x, y, field, threshold=1e-12):
+    """
+    Find null points in a 2D field where the field gradients are zero.
+    This is a vectorized 2D adaptation of the method described in https://doi.org/10.1063/1.2756751.
 
-    diff = np.abs((z - level)) / (dx*dy)**2
+    Args:
+        x (numpy.ndarray): 1D array of x-coordinates (shape: (nx,)).
+        y (numpy.ndarray): 1D array of y-coordinates (shape: (ny,)).
+        field (numpy.ndarray): 2D array of field values (shape: (ny, nx)).
+        threshold (float, optional): Numerical threshold for null point calculations. Defaults to 1e-12.
 
-    # Find indices of points where diff is close to its minimum
-    threshold = 1.05 * np.min(diff)
-    indices = np.where(diff < threshold)
-    approx_nulls = list(zip(indices[1], indices[0]))  # (col, row) pairs
+    Returns:
+        numpy.ndarray: Array of shape (n, 2) containing x and y coordinates of null points.
+    """
 
-    interp_psi = interpolate.RectBivariateSpline(y, x, z, kx=3, ky=3)  # Cubic spline
-
-    def grad_psi(x, interp):
-        """
-        Compute gradient at point x = [r_val, z_val]
-        """
-        r_val, z_val = x
-        dpsi_dr = interp.ev(z_val, r_val, dx=1, dy=0)
-        dpsi_dz = interp.ev(z_val, r_val, dx=0, dy=1)
-        return np.array([dpsi_dr, dpsi_dz])
-
-    def objective(x, interp):
-        """
-        Minimize |∇ψ|^2
-        """
-        grad = grad_psi(x, interp)
-        return np.sum(grad**2)
-
-    # Refine each approximate null
-    exact_rz = []
-    for col, row in approx_nulls:
-        r_guess = x[col]
-        z_guess = y[row]
-        x0 = [r_guess, z_guess]
-        
-        # Minimize |∇ψ|^2 starting from approximate point
-        result = optimize.minimize(objective, x0, args=(interp_psi,), method='L-BFGS-B',
-                        bounds=[(x.min(), x.max()), (y.min(), y.max())])
-        
-        if result.success and result.fun < 1e-6:  # Check if gradient is near zero
-            exact_rz.append((result.x[0], result.x[1]))
+    # compute gradients
+    ddzfield, ddrfield = np.gradient(field, y, x)
     
-    return np.array(exact_rz)
+    # grid dimensions
+    nz, nr = field.shape
+    nz, nr = nz - 1, nr - 1
+    
+    # create meshgrid indices for cells
+    i, j = np.indices((nz, nr))
+    i, j = i.ravel(), j.ravel()
+    
+    # extract corner values for all cells
+    v1_00 = ddrfield[:-1, :-1].ravel()
+    v1_01 = ddrfield[:-1, 1:].ravel()
+    v1_10 = ddrfield[1:, :-1].ravel()
+    v1_11 = ddrfield[1:, 1:].ravel()
+    
+    v2_00 = ddzfield[:-1, :-1].ravel()
+    v2_01 = ddzfield[:-1, 1:].ravel()
+    v2_10 = ddzfield[1:, :-1].ravel()
+    v2_11 = ddzfield[1:, 1:].ravel()
+    
+    # filter cells where both ddrfield and ddzfield can cross zero
+    v1_min = np.minimum.reduce([v1_00, v1_01, v1_10, v1_11])
+    v1_max = np.maximum.reduce([v1_00, v1_01, v1_10, v1_11])
+    v2_min = np.minimum.reduce([v2_00, v2_01, v2_10, v2_11])
+    v2_max = np.maximum.reduce([v2_00, v2_01, v2_10, v2_11])
+    
+    valid_cells = ~((v1_min > 0) | (v1_max < 0) | (v2_min > 0) | (v2_max < 0))
+    i, j = i[valid_cells], j[valid_cells]
+    v1_00, v1_01, v1_10, v1_11 = v1_00[valid_cells], v1_01[valid_cells], v1_10[valid_cells], v1_11[valid_cells]
+    v2_00, v2_01, v2_10, v2_11 = v2_00[valid_cells], v2_01[valid_cells], v2_10[valid_cells], v2_11[valid_cells]
+    
+    # bilinear coefficients for v1(s, t) = a1 + b1 t + c1 s + d1 s t
+    a1 = v1_00
+    b1 = v1_01 - v1_00
+    c1 = v1_10 - v1_00
+    d1 = v1_00 - v1_01 - v1_10 + v1_11
+    
+    # bilinear coefficients for v2(s, t)
+    a2 = v2_00
+    b2 = v2_01 - v2_00
+    c2 = v2_10 - v2_00
+    d2 = v2_00 - v2_01 - v2_10 + v2_11
+    
+    # solve quadratic equation: A t^2 + B t + C = 0
+    A = b2 * d1 - d2 * b1
+    B = a2 * d1 + b2 * c1 - c2 * b1 - d2 * a1
+    C = a2 * c1 - c2 * a1
+    
+    # make linear and quadratic masks
+    linear_mask = np.abs(A) < threshold
+    quadratic_mask = ~linear_mask
+    
+    # linear case: solve B t + C = 0 for t
+    linear_valid = linear_mask & (np.abs(B) >= threshold)
+    t_linear = -C[linear_valid] / B[linear_valid]
+    
+    # quadratic case: solve A t^2 + B t + C = 0 for t
+    disc = B[quadratic_mask]**2 - 4 * A[quadratic_mask] * C[quadratic_mask]
+    valid_quad = disc >= 0
+    sqrt_disc = np.sqrt(disc[valid_quad])
+    A_quad = A[quadratic_mask][valid_quad]
+    B_quad = B[quadratic_mask][valid_quad]
+    
+    t1 = (-B_quad + sqrt_disc) / (2 * A_quad)
+    t2 = (-B_quad - sqrt_disc) / (2 * A_quad)
+    
+    # combine solution branches
+    t_all = np.concatenate([
+        t_linear,
+        t1, t2
+    ])
+    idx_linear = np.where(linear_valid)[0]
+    idx_quad = np.where(quadratic_mask)[0][valid_quad]
+    idx_all = np.concatenate([
+        idx_linear,
+        idx_quad, idx_quad
+    ])
+    
+    # filter t values in [0, 1]
+    t_mask = (t_all >= 0) & (t_all <= 1)
+    t_all = t_all[t_mask]
+    idx_all = idx_all[t_mask]
+    
+    # compute s for each valid t
+    den = c1[idx_all] + d1[idx_all] * t_all
+    num = a1[idx_all] + b1[idx_all] * t_all
+    den_mask = np.abs(den) >= threshold
+    s_all = np.zeros_like(t_all)
+    s_all[den_mask] = -num[den_mask] / den[den_mask]
+    
+    # filter s values in [0, 1]
+    s_mask = (s_all >= 0) & (s_all <= 1)
+    t_all = t_all[s_mask]
+    s_all = s_all[s_mask]
+    idx_all = idx_all[s_mask]
+    
+    # map to physical coordinates
+    x0 = x[j[idx_all]]
+    x1 = x[j[idx_all] + 1]
+    y0 = y[i[idx_all]]
+    y1 = y[i[idx_all] + 1]
+    
+    x_null = x0 + t_all * (x1 - x0)
+    y_null = y0 + s_all * (y1 - y0)
+    null_points = np.vstack((x_null, y_null)).T
+
+    return null_points
+
+def null_classifier(nulls, x, y, field, level=None, atol=1e-3, delta=1e-5, eigtol=1e-10):
+    """
+    Classify null points as O-points (local minima/maxima) or X-points (saddle points) based on the
+    Hessian matrix of the field.
+
+    Args:
+        nulls (numpy.ndarray): Array of null points with shape (n, 2), where each row is [x, y].
+        x (numpy.ndarray): 1D array of x-coordinates (shape: (nx,)).
+        y (numpy.ndarray): 1D array of y-coordinates (shape: (ny,)).
+        field (numpy.ndarray): 2D array of field values (shape: (ny, nx)).
+        level (float, optional): Field value to filter null points. If provided, only null points
+            where the field value is within `atol` of `level` are returned. Defaults to None.
+        atol (float, optional): Absolute tolerance for level filtering. Defaults to 1e-3.
+        delta (float, optional): Step size for finite difference calculations of second derivatives.
+            Defaults to 1e-5.
+        eigtol (float, optional): Eigenvalue tolerance for classifying points. Defaults to 1e-10.
+
+    Returns:
+        dict: Dictionary with keys 'o-points' and 'x-points', each containing a numpy.ndarray of
+            shape (m, 2) with [x, y] coordinates of classified points.
+    """
+    # create interpolator for level filtering and second derivatives
+    interpolator = interpolate.RegularGridInterpolator((y, x), field, method='cubic', bounds_error=False, fill_value=np.nan)
+
+    # swap to (y, x) for interpolator
+    points = np.array([[_y, _x] for _x, _y in nulls])
+
+    if len(nulls) == 0:
+        return {'o-points': [], 'x-points': []}
+    
+    # points for second derivatives
+    points_x_plus = points + np.array([0, delta])
+    points_x_minus = points - np.array([0, delta])
+    points_y_plus = points + np.array([delta, 0])
+    points_y_minus = points - np.array([delta, 0])
+    points_xy_plus = points + np.array([delta, delta])
+    points_xy_minus = points + np.array([delta, -delta])
+    points_yx_plus = points + np.array([-delta, delta])
+    points_yx_minus = points + np.array([-delta, -delta])
+    
+    # evaluate field interpolator at all points
+    val = interpolator(points)
+    val_x_plus = interpolator(points_x_plus)
+    val_x_minus = interpolator(points_x_minus)
+    val_y_plus = interpolator(points_y_plus)
+    val_y_minus = interpolator(points_y_minus)
+    val_xy_plus = interpolator(points_xy_plus)
+    val_xy_minus = interpolator(points_xy_minus)
+    val_yx_plus = interpolator(points_yx_plus)
+    val_yx_minus = interpolator(points_yx_minus)
+    
+    # compute second derivatives using finite differences
+    d2dx2_field = (val_x_plus - 2 * val + val_x_minus) / (delta**2)
+    d2dy2_field = (val_y_plus - 2 * val + val_y_minus) / (delta**2)
+    d2dxdy_field = (val_xy_plus - val_xy_minus - val_yx_plus + val_yx_minus) / (4 * delta**2)
+    
+    # form Hessian matrix: shape (n_points, 2, 2)
+    hessian = np.array([
+        [d2dx2_field, d2dxdy_field],
+        [d2dxdy_field, d2dy2_field]
+    ]).transpose(2, 0, 1)  # shape: (n_points, 2, 2)
+    
+    # compute eigenvalues for all Hessians
+    lamba = np.linalg.eigvals(hessian).real  # shape: (n_points, 2)
+    eig1, eig2 = lamba[:, 0], lamba[:, 1]
+    
+    # classify points
+    is_o_point = ((eig1 > eigtol) & (eig2 > eigtol)) | ((eig1 < -eigtol) & (eig2 < -eigtol))
+    is_x_point = ((eig1 > eigtol) & (eig2 < -eigtol)) | ((eig1 < -eigtol) & (eig2 > eigtol))
+    
+    # Extract O-points and X-points
+    o_points = nulls[is_o_point]
+    x_points = nulls[is_x_point]
+
+    # filter nulls by level if provided
+    if level is not None:
+        _o_points = np.array([[_y, _x] for _x, _y in o_points])
+        _x_points = np.array([[_y, _x] for _x, _y in x_points])
+        o_values = interpolator(_o_points)
+        x_values = interpolator(_x_points)
+        o_mask = np.abs(o_values - level) <= atol
+        x_mask = np.abs(x_values - level) <= atol
+        o_points = o_points[o_mask]
+        x_points = x_points[x_mask]
+    
+    return {'o-points': o_points, 'x-points': x_points}
+
+def find_x_points(x, y, field, level=None, atol=1e-3):
+    """
+    Find X-points (saddle points) in a 2D field.
+
+    Args:
+        x (numpy.ndarray): 1D array of x-coordinates (shape: (nx,)).
+        y (numpy.ndarray): 1D array of y-coordinates (shape: (ny,)).
+        field (numpy.ndarray): 2D array of field values (shape: (ny, nx)).
+        level (float, optional): Field value to filter X-points. If provided, only X-points
+            where the field value is within `atol` of `level` are returned. Defaults to None.
+        atol (float, optional): Absolute tolerance for level filtering. Defaults to 1e-3.
+
+    Returns:
+        numpy.ndarray: Array of shape (m, 2) containing [x, y] coordinates of X-points.
+    """
+    nulls = find_nulls(x, y, field)
+    return null_classifier(nulls, x, y, field, level=level, atol=atol)['x-points']
+
+def find_o_points(x, y, field, level=None, atol=1e-3):
+    """
+    Find O-points (local minima or maxima) in a 2D vector field.
+
+    Args:
+        x (numpy.ndarray): 1D array of x-coordinates (shape: (nx,)).
+        y (numpy.ndarray): 1D array of y-coordinates (shape: (ny,)).
+        field (numpy.ndarray): 2D array of field values (shape: (ny, nx)).
+        level (float, optional): Field value to filter O-points. If provided, only O-points
+            where the field value is within `atol` of `level` are returned. Defaults to None.
+        atol (float, optional): Absolute tolerance for level filtering. Defaults to 1e-3.
+
+    Returns:
+        numpy.ndarray: Array of shape (m, 2) containing [x, y] coordinates of O-points.
+    """
+    nulls = find_nulls(x, y, field)
+    return null_classifier(nulls, x, y, field, level=level, atol=atol)['o-points']
+
+def find_null_points(x, y, field, level=None, atol=1e-3):
+    """
+    Find and classify all null points (O-points and X-points) in a 2D vector field.
+
+    Args:
+        x (numpy.ndarray): 1D array of x-coordinates (shape: (nx,)).
+        y (numpy.ndarray): 1D array of y-coordinates (shape: (ny,)).
+        field (numpy.ndarray): 2D array of field values (shape: (ny, nx)).
+        level (float, optional): Field value to filter null points. If provided, only null points
+            where the field value is within `atol` of `level` are returned. Defaults to None.
+        atol (float, optional): Absolute tolerance for level filtering. Defaults to 1e-3.
+
+    Returns:
+        dict: Dictionary with keys 'o-points' and 'x-points', each containing a numpy.ndarray of
+            shape (m, 2) with [x, y] coordinates of classified points.
+    """
+    nulls = find_nulls(x, y, field)
+    return null_classifier(nulls, x, y, field, level=level, atol=atol)
 
 def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
     # compute the difference field
@@ -296,7 +518,7 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         threshold = np.sqrt((1.5 * dx)**2 + (1.5 * dy)**2)
 
         if x_point:
-            x_points = find_x_point(x, y, field,level)
+            x_points = find_x_points(x, y, field, level)
 
             # Compute grid spacing and radius
             radius = np.sqrt((1. * dx)**2 + (1. * dy)**2)
@@ -308,7 +530,6 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
                 y_coordinates = np.concatenate([y_coordinates[mask],np.repeat(_x_point[1],2)])
 
         contours = sort2d(x_coordinates, y_coordinates, ref_point, threshold, x_point=x_point)
-        #contours = [(x_coordinates, y_coordinates)]
 
     else:
         x_coordinates = np.array([])
@@ -319,7 +540,8 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
     return contours
 
 def contour_center(c):
-    """Find the geometric center of a contour trace c given by c['X'], c['Y'].
+    """
+    Find the geometric center of a contour trace c given by c['X'], c['Y'].
 
     Args:
         `c` (dict): description of the contour, c={['X'],['Y'],['label'],...}, where:
@@ -350,7 +572,8 @@ def contour_center(c):
     return c
 
 def contour_extrema(c):
-    """Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
+    """
+    Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
 
     Args:
         `c` (dict): description of the contour, c={['X'],['Y'],['Y0'],['label'],...}, where:
