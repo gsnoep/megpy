@@ -237,6 +237,12 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
              np.append(seg[1], seg[1][0]) if to_close[i] else seg[1])
             for i, seg in enumerate(segments)
         ]
+
+        # sort segments based on minimum distance to the reference point
+        if ref_point is not None:
+            # compute the minimum distance to the reference point for all segments
+            ref_dist = [np.min(np.linalg.norm(np.column_stack((seg[0],seg[1]))-ref_point, axis=1)) for seg in segments]
+            segments = [segments[i] for i in np.argsort(ref_dist)]
     
     return segments
 
