@@ -142,6 +142,7 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
     - threshold: Distance threshold for segment splitting (default: 2 * median distance).
     - start: 'farthest' or 'closest' to ref_point (default: 'farthest').
     - metric: Distance metric for cdist (default: 'euclidean').
+    - x_point: Boolean flag to activate the sorting considerations when x-points are present.
 
     Returns:
     - segments: List of tuples, each containing (x_coords, y_coords) for a segment.
@@ -195,6 +196,17 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
                 
             segment_indices.append(next_idx)
             used[next_idx] = True
+
+            # check if the path length is optimal near the start and swap if needed
+            if len(segment_indices) == 3:
+                
+                # compare dist(0,2) and dist(1,2)
+                dist_0_2 = dist_matrix[segment_indices[0], segment_indices[2]]
+                dist_1_2 = dist_matrix[segment_indices[1], segment_indices[2]]
+                
+                # swap indices in segment_indices if dist_0_2 < dist_1_2
+                if dist_0_2 < dist_1_2:
+                    segment_indices[0], segment_indices[1] = segment_indices[1], segment_indices[0]
         
         # store segment coordinates
         segment_coords = coordinates[segment_indices]
@@ -215,7 +227,7 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
         
         # compute distances between first and last points
         distances = np.linalg.norm(last_coords - first_coords, axis=1)
-        
+
         # identify segments to close: distance <= threshold and not identical
         to_close = (distances <= threshold) & (first_points != last_points)
         
@@ -528,6 +540,8 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
                 mask = distances > radius
                 x_coordinates = np.concatenate([x_coordinates[mask],np.repeat(_x_point[0],2)])
                 y_coordinates = np.concatenate([y_coordinates[mask],np.repeat(_x_point[1],2)])
+            
+            threshold = np.sqrt((2 * dx)**2 + (2 * dy)**2)
 
         contours = sort2d(x_coordinates, y_coordinates, ref_point, threshold, x_point=x_point)
 
