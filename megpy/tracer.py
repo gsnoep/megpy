@@ -246,23 +246,23 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
     
     return segments
 
-def find_nulls(x, y, field, threshold=1e-12):
+def find_nulls(x, y, field, threshold=1e-9):
     """
-    Find null points in a 2D field where the field gradients are zero.
-    This is a vectorized 2D adaptation of the method described in https://doi.org/10.1063/1.2756751.
+    Find null points in a 2D scalar field where the field gradients are zero.
+    This is a vectorized 2D adaptation of the method described in https://arxiv.org/abs/0706.0521.
 
     Args:
         x (numpy.ndarray): 1D array of x-coordinates (shape: (nx,)).
         y (numpy.ndarray): 1D array of y-coordinates (shape: (ny,)).
         field (numpy.ndarray): 2D array of field values (shape: (ny, nx)).
-        threshold (float, optional): Numerical threshold for null point calculations. Defaults to 1e-12.
+        threshold (float, optional): Numerical threshold for null point calculations. Defaults to 1e-9.
 
     Returns:
         numpy.ndarray: Array of shape (n, 2) containing x and y coordinates of null points.
     """
 
     # compute gradients
-    ddzfield, ddrfield = np.gradient(field, y, x)
+    ddzfield, ddrfield = np.gradient(field, y, x, edge_order=2)
     
     # grid dimensions
     nz, nr = field.shape
@@ -282,53 +282,60 @@ def find_nulls(x, y, field, threshold=1e-12):
     v2_01 = ddzfield[:-1, 1:].ravel()
     v2_10 = ddzfield[1:, :-1].ravel()
     v2_11 = ddzfield[1:, 1:].ravel()
-    
-    # filter cells where both ddrfield and ddzfield can cross zero
+
+    # extract field values at cell corners
+    f_00 = field[:-1, :-1].ravel()
+    f_01 = field[:-1, 1:].ravel()
+    f_10 = field[1:, :-1].ravel()
+    f_11 = field[1:, 1:].ravel()
+
+    # filter cells where both ddrfield and ddzfield can cross zero and field is not all zero
     v1_min = np.minimum.reduce([v1_00, v1_01, v1_10, v1_11])
     v1_max = np.maximum.reduce([v1_00, v1_01, v1_10, v1_11])
     v2_min = np.minimum.reduce([v2_00, v2_01, v2_10, v2_11])
     v2_max = np.maximum.reduce([v2_00, v2_01, v2_10, v2_11])
-    
-    valid_cells = ~((v1_min > 0) | (v1_max < 0) | (v2_min > 0) | (v2_max < 0))
+    f_max_abs = np.maximum.reduce([np.abs(f_00), np.abs(f_01), np.abs(f_10), np.abs(f_11)])
+
+    valid_cells = ~((v1_min > 0) | (v1_max < 0) | (v2_min > 0) | (v2_max < 0)) & (f_max_abs >= threshold)
     i, j = i[valid_cells], j[valid_cells]
     v1_00, v1_01, v1_10, v1_11 = v1_00[valid_cells], v1_01[valid_cells], v1_10[valid_cells], v1_11[valid_cells]
     v2_00, v2_01, v2_10, v2_11 = v2_00[valid_cells], v2_01[valid_cells], v2_10[valid_cells], v2_11[valid_cells]
-    
+
     # bilinear coefficients for v1(s, t) = a1 + b1 t + c1 s + d1 s t
     a1 = v1_00
     b1 = v1_01 - v1_00
     c1 = v1_10 - v1_00
     d1 = v1_00 - v1_01 - v1_10 + v1_11
-    
+
     # bilinear coefficients for v2(s, t)
     a2 = v2_00
     b2 = v2_01 - v2_00
     c2 = v2_10 - v2_00
     d2 = v2_00 - v2_01 - v2_10 + v2_11
-    
+
     # solve quadratic equation: A t^2 + B t + C = 0
     A = b2 * d1 - d2 * b1
     B = a2 * d1 + b2 * c1 - c2 * b1 - d2 * a1
     C = a2 * c1 - c2 * a1
-    
+
     # make linear and quadratic masks
     linear_mask = np.abs(A) < threshold
     quadratic_mask = ~linear_mask
-    
+
     # linear case: solve B t + C = 0 for t
     linear_valid = linear_mask & (np.abs(B) >= threshold)
     t_linear = -C[linear_valid] / B[linear_valid]
-    
+
     # quadratic case: solve A t^2 + B t + C = 0 for t
     disc = B[quadratic_mask]**2 - 4 * A[quadratic_mask] * C[quadratic_mask]
     valid_quad = disc >= 0
     sqrt_disc = np.sqrt(disc[valid_quad])
     A_quad = A[quadratic_mask][valid_quad]
     B_quad = B[quadratic_mask][valid_quad]
-    
+
     t1 = (-B_quad + sqrt_disc) / (2 * A_quad)
     t2 = (-B_quad - sqrt_disc) / (2 * A_quad)
-    
+
     # combine solution branches
     t_all = np.concatenate([
         t_linear,
@@ -340,12 +347,12 @@ def find_nulls(x, y, field, threshold=1e-12):
         idx_linear,
         idx_quad, idx_quad
     ])
-    
+
     # filter t values in [0, 1]
     t_mask = (t_all >= 0) & (t_all <= 1)
     t_all = t_all[t_mask]
     idx_all = idx_all[t_mask]
-    
+
     # compute s for each valid t
     den = c1[idx_all] + d1[idx_all] * t_all
     num = a1[idx_all] + b1[idx_all] * t_all
