@@ -246,135 +246,112 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
     
     return segments
 
-def find_nulls(x, y, field, threshold=1e-9):
+def find_nulls(x, y, field, threshold=1e-6):
     """
-    Find null points in a 2D scalar field where the field gradients are zero.
-    This is a vectorized 2D adaptation of the method described in https://arxiv.org/abs/0706.0521.
+    Find null points in a 2D scalar field where gradients are zero, using a partially vectorized approach.
+    Adapted from https://arxiv.org/abs/0706.0521 with bicubic interpolation and numerical root-finding.
 
     Args:
         x (numpy.ndarray): 1D array of x-coordinates (shape: (nx,)).
         y (numpy.ndarray): 1D array of y-coordinates (shape: (ny,)).
         field (numpy.ndarray): 2D array of field values (shape: (ny, nx)).
-        threshold (float, optional): Numerical threshold for null point calculations. Defaults to 1e-9.
+        threshold (float, optional): Numerical threshold for null point calculations. Defaults to 1e-6.
 
     Returns:
         numpy.ndarray: Array of shape (n, 2) containing x and y coordinates of null points.
     """
 
+    # list to collect null points
+    null_points = []
+
     # compute gradients
-    ddzfield, ddrfield = np.gradient(field, y, x, edge_order=2)
+    ddyfield, ddxfield = np.gradient(field, y, x, edge_order=2)
     
     # grid dimensions
-    nz, nr = field.shape
-    nz, nr = nz - 1, nr - 1
+    ny, nx = field.shape
     
-    # create meshgrid indices for cells
-    i, j = np.indices((nz, nr))
-    i, j = i.ravel(), j.ravel()
+    # pad gradients and coordinates
+    ddx_pad = np.pad(ddxfield, 1, mode='edge')
+    ddy_pad = np.pad(ddyfield, 1, mode='edge')
     
-    # extract corner values for all cells
-    v1_00 = ddrfield[:-1, :-1].ravel()
-    v1_01 = ddrfield[:-1, 1:].ravel()
-    v1_10 = ddrfield[1:, :-1].ravel()
-    v1_11 = ddrfield[1:, 1:].ravel()
+    x_left = x[0] - (x[1] - x[0]) if len(x) > 1 else x[0]
+    x_right = x[-1] + (x[-1] - x[-2]) if len(x) > 1 else x[-1]
+    x_pad = np.pad(x, 1, mode='constant', constant_values=(x_left, x_right))
     
-    v2_00 = ddzfield[:-1, :-1].ravel()
-    v2_01 = ddzfield[:-1, 1:].ravel()
-    v2_10 = ddzfield[1:, :-1].ravel()
-    v2_11 = ddzfield[1:, 1:].ravel()
+    y_left = y[0] - (y[1] - y[0]) if len(y) > 1 else y[0]
+    y_right = y[-1] + (y[-1] - y[-2]) if len(y) > 1 else y[-1]
+    y_pad = np.pad(y, 1, mode='constant', constant_values=(y_left, y_right))
 
-    # extract field values at cell corners
-    f_00 = field[:-1, :-1].ravel()
-    f_01 = field[:-1, 1:].ravel()
-    f_10 = field[1:, :-1].ravel()
-    f_11 = field[1:, 1:].ravel()
-
-    # filter cells where both ddrfield and ddzfield can cross zero and field is not all zero
-    v1_min = np.minimum.reduce([v1_00, v1_01, v1_10, v1_11])
-    v1_max = np.maximum.reduce([v1_00, v1_01, v1_10, v1_11])
-    v2_min = np.minimum.reduce([v2_00, v2_01, v2_10, v2_11])
-    v2_max = np.maximum.reduce([v2_00, v2_01, v2_10, v2_11])
-    f_max_abs = np.maximum.reduce([np.abs(f_00), np.abs(f_01), np.abs(f_10), np.abs(f_11)])
-
-    valid_cells = ~((v1_min > 0) | (v1_max < 0) | (v2_min > 0) | (v2_max < 0)) & (f_max_abs >= threshold)
-    i, j = i[valid_cells], j[valid_cells]
-    v1_00, v1_01, v1_10, v1_11 = v1_00[valid_cells], v1_01[valid_cells], v1_10[valid_cells], v1_11[valid_cells]
-    v2_00, v2_01, v2_10, v2_11 = v2_00[valid_cells], v2_01[valid_cells], v2_10[valid_cells], v2_11[valid_cells]
-
-    # bilinear coefficients for v1(s, t) = a1 + b1 t + c1 s + d1 s t
-    a1 = v1_00
-    b1 = v1_01 - v1_00
-    c1 = v1_10 - v1_00
-    d1 = v1_00 - v1_01 - v1_10 + v1_11
-
-    # bilinear coefficients for v2(s, t)
-    a2 = v2_00
-    b2 = v2_01 - v2_00
-    c2 = v2_10 - v2_00
-    d2 = v2_00 - v2_01 - v2_10 + v2_11
-
-    # solve quadratic equation: A t^2 + B t + C = 0
-    A = b2 * d1 - d2 * b1
-    B = a2 * d1 + b2 * c1 - c2 * b1 - d2 * a1
-    C = a2 * c1 - c2 * a1
-
-    # make linear and quadratic masks
-    linear_mask = np.abs(A) < threshold
-    quadratic_mask = ~linear_mask
-
-    # linear case: solve B t + C = 0 for t
-    linear_valid = linear_mask & (np.abs(B) >= threshold)
-    t_linear = -C[linear_valid] / B[linear_valid]
-
-    # quadratic case: solve A t^2 + B t + C = 0 for t
-    disc = B[quadratic_mask]**2 - 4 * A[quadratic_mask] * C[quadratic_mask]
-    valid_quad = disc >= 0
-    sqrt_disc = np.sqrt(disc[valid_quad])
-    A_quad = A[quadratic_mask][valid_quad]
-    B_quad = B[quadratic_mask][valid_quad]
-
-    t1 = (-B_quad + sqrt_disc) / (2 * A_quad)
-    t2 = (-B_quad - sqrt_disc) / (2 * A_quad)
-
-    # combine solution branches
-    t_all = np.concatenate([
-        t_linear,
-        t1, t2
-    ])
-    idx_linear = np.where(linear_valid)[0]
-    idx_quad = np.where(quadratic_mask)[0][valid_quad]
-    idx_all = np.concatenate([
-        idx_linear,
-        idx_quad, idx_quad
-    ])
-
-    # filter t values in [0, 1]
-    t_mask = (t_all >= 0) & (t_all <= 1)
-    t_all = t_all[t_mask]
-    idx_all = idx_all[t_mask]
-
-    # compute s for each valid t
-    den = c1[idx_all] + d1[idx_all] * t_all
-    num = a1[idx_all] + b1[idx_all] * t_all
-    den_mask = np.abs(den) >= threshold
-    s_all = np.zeros_like(t_all)
-    s_all[den_mask] = -num[den_mask] / den[den_mask]
+    # vectorized cell filtering
+    jj, ii = np.meshgrid(np.arange(nx-1), np.arange(ny-1))
+    jj, ii = jj.ravel(), ii.ravel()
     
-    # filter s values in [0, 1]
-    s_mask = (s_all >= 0) & (s_all <= 1)
-    t_all = t_all[s_mask]
-    s_all = s_all[s_mask]
-    idx_all = idx_all[s_mask]
+    # extract 4x4 local grids for gradients
+    v1_locals = np.array([ddx_pad[i:i+4, j:j+4] for i, j in zip(ii, jj)])
+    v2_locals = np.array([ddy_pad[i:i+4, j:j+4] for i, j in zip(ii, jj)])
     
-    # map to physical coordinates
-    x0 = x[j[idx_all]]
-    x1 = x[j[idx_all] + 1]
-    y0 = y[i[idx_all]]
-    y1 = y[i[idx_all] + 1]
+    # extract 2x2 field values for filtering
+    f_locals = np.array([field[i:i+2, j:j+2] for i, j in zip(ii, jj)])
+    f_max_abs = np.max(np.abs(f_locals), axis=(1, 2))
     
-    x_null = x0 + t_all * (x1 - x0)
-    y_null = y0 + s_all * (y1 - y0)
-    null_points = np.vstack((x_null, y_null)).T
+    # filter cells where gradients cross zero and field magnitude is sufficient
+    v1_min = np.min(v1_locals, axis=(1, 2))
+    v1_max = np.max(v1_locals, axis=(1, 2))
+    v2_min = np.min(v2_locals, axis=(1, 2))
+    v2_max = np.max(v2_locals, axis=(1, 2))
+    
+    valid_cells = (v1_min <= 0) & (v1_max >= 0) & (v2_min <= 0) & (v2_max >= 0) & (f_max_abs >= threshold)
+    valid_idx = np.where(valid_cells)[0]
+    
+    if not valid_idx.size:
+        return np.empty((0, 2))
+
+    # extract valid cell indices and local grids
+    ii_valid = ii[valid_idx]
+    jj_valid = jj[valid_idx]
+    v1_locals = v1_locals[valid_idx]
+    v2_locals = v2_locals[valid_idx]
+
+    # process each valid cell
+    for i, j, v1_local, v2_local in zip(ii_valid, jj_valid, v1_locals, v2_locals):
+        # local coordinates for interpolation
+        x_local = x_pad[j:j+4]
+        y_local = y_pad[i:i+4]
+
+        # create bicubic interpolators
+        interp_v1 = interpolate.RectBivariateSpline(y_local, x_local, v1_local, kx=3, ky=3, s=0)
+        interp_v2 = interpolate.RectBivariateSpline(y_local, x_local, v2_local, kx=3, ky=3, s=0)
+
+        # cell boundaries
+        x0, x1 = x[j], x[j + 1]
+        y0, y1 = y[i], y[i + 1]
+
+        # function for fsolve
+        def interpolator(st):
+            xp = x0 + st[0] * (x1 - x0)
+            yp = y0 + st[1] * (y1 - y0)
+            return np.array([interp_v1(yp, xp, grid=False), interp_v2(yp, xp, grid=False)])
+
+        # start from initial guess at cell center
+        init = np.array([0.5, 0.5])
+        sol, infodict, ier, mesg = optimize.fsolve(interpolator, init, full_output=True)
+        if ier == 1 and np.all(sol >= 0) and np.all(sol <= 1):
+            residual = np.linalg.norm(interpolator(sol))
+            if residual < threshold:
+                xp = x0 + sol[0] * (x1 - x0)
+                yp = y0 + sol[1] * (y1 - y0)
+                null_points.append([xp, yp])
+
+    # convert to array and remove duplicates
+    if null_points:
+        null_points = np.array(null_points)
+        sort_idx = np.lexsort((null_points[:, 1], null_points[:, 0]))
+        null_points = null_points[sort_idx]
+        diff = np.diff(null_points, axis=0)
+        mask = np.linalg.norm(diff, axis=1) > threshold
+        null_points = null_points[np.concatenate(([True], mask))]
+    else:
+        null_points = np.empty((0, 2))
 
     return null_points
 
