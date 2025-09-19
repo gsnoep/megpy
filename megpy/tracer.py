@@ -318,9 +318,9 @@ def find_nulls(x, y, field, threshold=1e-6):
         x_local = x_pad[j:j+4]
         y_local = y_pad[i:i+4]
 
-        # create bicubic interpolators
-        interp_v1 = interpolate.RectBivariateSpline(y_local, x_local, v1_local, kx=3, ky=3, s=0)
-        interp_v2 = interpolate.RectBivariateSpline(y_local, x_local, v2_local, kx=3, ky=3, s=0)
+        # create bicubic interpolators (swap x, y order)
+        interp_v1 = interpolate.RectBivariateSpline(x_local, y_local, v1_local.T, kx=3, ky=3, s=0)
+        interp_v2 = interpolate.RectBivariateSpline(x_local, y_local, v2_local.T, kx=3, ky=3, s=0)
 
         # cell boundaries
         x0, x1 = x[j], x[j + 1]
@@ -330,7 +330,7 @@ def find_nulls(x, y, field, threshold=1e-6):
         def interpolator(st):
             xp = x0 + st[0] * (x1 - x0)
             yp = y0 + st[1] * (y1 - y0)
-            return np.array([interp_v1(yp, xp, grid=False), interp_v2(yp, xp, grid=False)])
+            return np.array([interp_v1(xp, yp, grid=False), interp_v2(xp, yp, grid=False)])
 
         # start from initial guess at cell center
         init = np.array([0.5, 0.5])
@@ -377,26 +377,23 @@ def null_classifier(nulls, x, y, field, level=None, atol=1e-3, delta=1e-5, eigto
             shape (m, 2) with [x, y] coordinates of classified points.
     """
     # create interpolator for level filtering and second derivatives
-    interpolator = interpolate.RegularGridInterpolator((y, x), field, method='cubic', bounds_error=False, fill_value=np.nan)
-
-    # swap to (y, x) for interpolator
-    points = np.array([[_y, _x] for _x, _y in nulls])
+    interpolator = interpolate.RegularGridInterpolator((x, y), field.T, method='cubic', bounds_error=False, fill_value=np.nan)
 
     if len(nulls) == 0:
         return {'o-points': [], 'x-points': []}
     
     # points for second derivatives
-    points_x_plus = points + np.array([0, delta])
-    points_x_minus = points - np.array([0, delta])
-    points_y_plus = points + np.array([delta, 0])
-    points_y_minus = points - np.array([delta, 0])
-    points_xy_plus = points + np.array([delta, delta])
-    points_xy_minus = points + np.array([delta, -delta])
-    points_yx_plus = points + np.array([-delta, delta])
-    points_yx_minus = points + np.array([-delta, -delta])
+    points_x_plus = nulls + np.array([delta, 0])
+    points_x_minus = nulls - np.array([delta, 0])
+    points_y_plus = nulls + np.array([0, delta])
+    points_y_minus = nulls - np.array([0, delta])
+    points_xy_plus = nulls + np.array([delta, delta])
+    points_xy_minus = nulls + np.array([delta, -delta])
+    points_yx_plus = nulls + np.array([-delta, delta])
+    points_yx_minus = nulls + np.array([-delta, -delta])
     
     # evaluate field interpolator at all points
-    val = interpolator(points)
+    val = interpolator(nulls)
     val_x_plus = interpolator(points_x_plus)
     val_x_minus = interpolator(points_x_minus)
     val_y_plus = interpolator(points_y_plus)
@@ -431,10 +428,8 @@ def null_classifier(nulls, x, y, field, level=None, atol=1e-3, delta=1e-5, eigto
 
     # filter nulls by level if provided
     if level is not None:
-        _o_points = np.array([[_y, _x] for _x, _y in o_points])
-        _x_points = np.array([[_y, _x] for _x, _y in x_points])
-        o_values = interpolator(_o_points)
-        x_values = interpolator(_x_points)
+        o_values = interpolator(o_points)
+        x_values = interpolator(x_points)
         o_mask = np.abs(o_values - level) <= atol
         x_mask = np.abs(x_values - level) <= atol
         o_points = o_points[o_mask]
