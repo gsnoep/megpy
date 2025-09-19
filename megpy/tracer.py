@@ -9,6 +9,7 @@ from scipy import integrate, interpolate, optimize, spatial
 
 from .utils import *
 
+# tracing methods
 def intersect1d(x, y, y_val, kind='l'):
     if kind == 'l':
         # find sign changes (roots likely here)
@@ -199,53 +200,177 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
 
             # check if the path length is optimal near the start and swap if needed
             if len(segment_indices) == 3:
-                
-                # compare dist(0,2) and dist(1,2)
                 dist_0_2 = dist_matrix[segment_indices[0], segment_indices[2]]
                 dist_1_2 = dist_matrix[segment_indices[1], segment_indices[2]]
-                
-                # swap indices in segment_indices if dist_0_2 < dist_1_2
                 if dist_0_2 < dist_1_2:
                     segment_indices[0], segment_indices[1] = segment_indices[1], segment_indices[0]
         
         # store segment coordinates
-        segment_coords = coordinates[segment_indices]
-        segments.append((segment_coords[:, 0], segment_coords[:, 1]))
+        segments.append(coordinates[segment_indices])
     
-    # close contour segments when the end is close to the start
     if segments:
-        #if x_point:
-            # case 1, segment self-intersects, a coordinate is repeated later in the sequence, 
-            # implementation: 1. check if any point in a segment is duplicated, 2. split the segment into two, 3. connect the part of the segment before the first occurrence to the part after the second occurrence (including this point) and leave the part between the two points in place. 
-            # case 2, segments share points, but don't connect, 
+        if x_point:
+            def find_shared_coords(segment_1, segment_2):
+                if len(segment_1) == 0 or len(segment_2) == 0:
+                    return None
+                
+                # find common rows using broadcasting
+                matches = np.all(segment_1[:, np.newaxis, :] == segment_2[np.newaxis, :, :], axis=2)
+                
+                # Get indices where rows match
+                i_shared_1, i_shared_2 = np.where(matches)
+
+                return  segment_1[i_shared_1], i_shared_1, i_shared_2
             
-        # extract first and last points for all segments
-        first_points = np.array([seg[0][0] for seg in segments])
-        last_points = np.array([seg[0][-1] for seg in segments])
-        first_coords = np.array([np.array([seg[0][0], seg[1][0]]) for seg in segments])
-        last_coords = np.array([np.array([seg[0][-1], seg[1][-1]]) for seg in segments])
-        
-        # compute distances between first and last points
-        distances = np.linalg.norm(last_coords - first_coords, axis=1)
+            def aligned_concat(segment_1, segment_2, threshold):
+                if len(segment_1) == 0 or len(segment_2) == 0:
+                    return False
+                
+                segment_1 = np.asarray(segment_1)
+                segment_2 = np.asarray(segment_2)
+                
+                ends = np.array([segment_1[0], segment_1[-1], segment_2[0], segment_2[-1]])
+                dists = np.linalg.norm(np.array([ends[1] - ends[2], ends[3] - ends[0], ends[0] - ends[2], ends[1] - ends[3]]), axis=1)
+                
+                if np.any(dists <= threshold):
+                    min_idx = np.argmin(dists)
+                    if min_idx == 0: 
+                        return np.vstack([segment_1, segment_2])
+                    elif min_idx == 1: 
+                        return np.vstack([segment_2, segment_1])
+                    elif min_idx == 2: 
+                        return np.vstack([segment_1[::-1], segment_2])
+                    else: 
+                        return np.vstack([segment_1, segment_2[::-1]])
+                return False
 
-        # identify segments to close: distance <= threshold and not identical
-        to_close = (distances <= threshold) & (first_points != last_points)
-        
-        # update segments: close those that meet the condition
-        segments = [
-            (np.append(seg[0], seg[0][0]) if to_close[i] else seg[0],
-             np.append(seg[1], seg[1][0]) if to_close[i] else seg[1])
-            for i, seg in enumerate(segments)
-        ]
+            # handle sorting exceptions around x-points
+            merged_segments = []
+            processed = set()
 
+            for i in range(len(segments)):
+                if i in processed:
+                    continue
+
+                intersection = False
+                segment_i = segments[i]
+
+                # case 1: segment self-intersects
+                unique_coords, counts = np.unique(segment_i, axis=0, return_counts=True)
+                if np.any(counts > 1):
+                    # get self-intersection indices
+                    intersection_coords = unique_coords[counts > 1]
+                    matches = np.where(np.any(np.all(segment_i[:, None, :] == intersection_coords[None, :, :], axis=-1), axis=1))[0]
+                    i_split = sorted([_i for _i in matches if _i not in [0, len(segment_i) - 1]])
+
+                    # split segments
+                    if i_split:
+                        split_segments = [_segment for _segment in np.split(segment_i, i_split, axis=0) if len(_segment) > 1]
+
+                        # merge ends
+                        if len(i_split) == 2:
+                            split_segments = [np.vstack([split_segments[0],split_segments[-1]]),split_segments[1]]
+                            merged_segments.extend(split_segments)
+                        
+                        else:
+                            # identify open and closed segments
+                            mask_closed_segments = np.array([np.linalg.norm(_segment[-1]-_segment[0],axis=0)<=threshold for _segment in split_segments])
+                            closed_split_segments = [split_segments[i] for i in np.where(mask_closed_segments)[0]]
+                            open_split_segments = [split_segments[i] for i in np.where(~mask_closed_segments)[0]]
+
+                            # try to merge the two open line segments closest to ref_point
+                            open_norm_ref_distances = [np.min(np.linalg.norm(_segment - ref_point, axis=1)) for _segment in open_split_segments]
+                            i_open_norm_ref = np.argsort(open_norm_ref_distances)
+                            trial_loop = aligned_concat(open_split_segments[i_open_norm_ref[0]], open_split_segments[i_open_norm_ref[1]], threshold)
+
+                            # check if the ends of the merged segments meet within threshold and update open/closed lists
+                            if np.linalg.norm(trial_loop[-1]-trial_loop[0],axis=0)<=threshold:
+                                closed_split_segments.append(trial_loop)
+                                open_split_segments = [open_split_segments[i] for i in np.where(~mask_closed_segments)[0] if i in i_open_norm_ref[2:]]
+                            
+                            open_segments = np.vstack(open_split_segments)
+                            for _intersect in intersection_coords:
+                                if _intersect not in open_segments:
+                                    distances = np.linalg.norm(open_segments-_intersect,axis=1)
+                                    i_close = np.where(distances <= threshold)[0]
+                                    if np.any(i_close):
+                                        open_segments = np.insert(open_segments,i_close[np.argmin(distances[i_close])]+1,_intersect,axis=0)
+
+                            # append segments to merged
+                            merged_segments.append(open_segments)
+                            merged_segments.extend(closed_split_segments)
+
+                        # continue with next segments
+                        intersection = True
+                        processed.add(i)
+                        continue
+
+                # case 2: segment intersects with other segments
+                for j in range(i + 1, len(segments)):
+                    if j in processed:
+                        continue
+
+                    segment_j = segments[j]
+
+                    # find shared coordinates with other segments
+                    intersection_coords, i_split_i, i_split_j = find_shared_coords(segment_i, segment_j)
+
+                    # check if there are one or more shared coordinates and the shared coordinate is not the intersection between two closed loops
+                    if len(i_split_i) >= 1 and ((np.linalg.norm(segment_i[0] - segment_i[-1]) > threshold) and (np.linalg.norm(segment_j[0] - segment_j[-1]) > threshold)):
+                        # split segments at shared point(s)
+                        segments_i = [_segment for _segment in np.split(segment_i, np.sort(i_split_i)) if len(_segment) > 1]
+                        segments_j = [_segment for _segment in np.split(segment_j, np.sort(i_split_j)) if len(_segment) > 1]
+
+                        # reverse segments order to account for sorting of i_split_i/j
+                        if len(i_split_i) > 1 and (i_split_i[-1] < i_split_i[0]):
+                            segments_i = segments_i[::-1]
+                        if len(i_split_j) > 1 and (i_split_j[-1] < i_split_j[0]):
+                            segments_j = segments_j[::-1]
+
+                        # try to concatenate corresponding split segments (assuming an even number of segments)
+                        for k in range(len(segments_i)):
+                            # collect the relevant intersection coordinates, l can at most be k-1
+                            l = min(k, len(intersection_coords) - 1)
+                            _intersection = intersection_coords[l]
+
+                            # ensure the intersection coordinates are present in at least on of the segments
+                            if not np.any(np.all(_intersection == segments_i[k], axis=1)) and not np.any(np.all(_intersection == segments_j[k], axis=1)):
+                                segments_i[k] = np.vstack((segments_i[k],_intersection))
+
+                            # try to align and merge the segments
+                            merged_segment = aligned_concat(segments_i[k], segments_j[k], threshold)
+                            if merged_segment is not False:
+                                merged_segments.append(merged_segment)
+                            else:
+                                # if aligning and merging fails, add split segments individually
+                                merged_segments.append(segments_i[k])
+                                merged_segments.append(segments_j[k])
+
+                        # update processed segments
+                        intersection = True
+                        processed.add(i)
+                        processed.add(j)
+                        break
+
+                # if no self-intersection or shared points detected, add the original segment
+                if not intersection:
+                    merged_segments.append(segments[i])
+                    processed.add(i)
+
+            # update segments after splitting/merging
+            segments = merged_segments
+        
         # sort segments based on minimum distance to the reference point
         if ref_point is not None:
             # compute the minimum distance to the reference point for all segments
-            ref_dist = [np.min(np.linalg.norm(np.column_stack((seg[0],seg[1]))-ref_point, axis=1)) for seg in segments]
+            ref_dist = [np.min(np.linalg.norm(seg-ref_point, axis=1)) for seg in segments]
             segments = [segments[i] for i in np.argsort(ref_dist)]
     
+    segments = [(seg[:,0],seg[:,1]) for seg in segments]
+
     return segments
 
+# null point detection
 def find_nulls(x, y, field, threshold=1e-6):
     """
     Find null points in a 2D scalar field where gradients are zero, using a partially vectorized approach.
@@ -492,6 +617,7 @@ def find_null_points(x, y, field, level=None, atol=1e-3):
     nulls = find_nulls(x, y, field)
     return null_classifier(nulls, x, y, field, level=level, atol=atol)
 
+# contour methods
 def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
     # compute the difference field
     diff = field - level
@@ -501,34 +627,75 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
     cols = np.where(np.any(np.diff(np.sign(diff), axis=0) != 0, axis=0))[0]
 
     # compute intersections
-    x_rows, y_rows = intersect2d(x, y, field, level, axis=1, indices=rows, kind=kind)
-    x_cols, y_cols = intersect2d(x, y, field, level, axis=0, indices=cols, kind=kind)
+    if len(rows)>0:
+        x_rows, y_rows = intersect2d(x, y, field, level, axis=1, indices=rows, kind=kind)
+    else:
+        x_rows, y_rows = np.array([]), np.array([])
+    if len(cols)>0:
+        x_cols, y_cols = intersect2d(x, y, field, level, axis=0, indices=cols, kind=kind)
+    else:
+        x_cols, y_cols = np.array([]), np.array([])
 
     # concatenate coordinates
     if x_rows.size > 0 or x_cols.size > 0:
         x_coordinates = np.concatenate([x_rows, x_cols])
         y_coordinates = np.concatenate([y_rows, y_cols])
 
+        # get grid spacing (assuming equidistant grid)
         dx = x[1] - x[0]
         dy = y[1] - y[0]
 
+        # set nearest neighbor threshold
         threshold = np.sqrt((1.5 * dx)**2 + (1.5 * dy)**2)
 
+        # handle x-points in the contour
         if x_point:
             x_points = find_x_points(x, y, field, level)
 
-            # Compute grid spacing and radius
-            radius = np.sqrt((1. * dx)**2 + (1. * dy)**2)
+            if np.any(x_points):
+                # compute elimination radius
+                radius = np.sqrt((.85 * dx)**2 + (.85 * dy)**2)
 
-            for _x_point in x_points:
-                distances = np.sqrt((x_coordinates-_x_point[0])**2+(y_coordinates-_x_point[1])**2)
-                mask = distances > radius
-                x_coordinates = np.concatenate([x_coordinates[mask],np.repeat(_x_point[0],2)])
-                y_coordinates = np.concatenate([y_coordinates[mask],np.repeat(_x_point[1],2)])
-            
-            threshold = np.sqrt((2 * dx)**2 + (2 * dy)**2)
+                # increase threshold
+                threshold = np.sqrt((2 * dx)**2 + (2 * dy)**2)
 
+                # eliminate points inside radius around an x-point to avoid jagged x-point approaches
+                x_distances = np.sqrt((x_coordinates[:, None] - x_points[:, 0])**2 + (y_coordinates[:, None] - x_points[:, 1])**2)
+                mask = np.all(x_distances > radius, axis=1)
+                x_coordinates = np.concatenate([x_coordinates[mask], np.repeat(x_points[:, 0], 2)])
+                y_coordinates = np.concatenate([y_coordinates[mask], np.repeat(x_points[:, 1], 2)])
+            else:
+                x_point = False
+
+        # apply nearest neighbor sorting to contour coordinates
         contours = sort2d(x_coordinates, y_coordinates, ref_point, threshold, x_point=x_point)
+
+        # extract first and last points for all contours
+        first_coords = np.array([np.array([seg[0][0], seg[1][0]]) for seg in contours])
+        last_coords = np.array([np.array([seg[0][-1], seg[1][-1]]) for seg in contours])
+        
+        # compute distances between first and last points
+        distances = np.linalg.norm(last_coords - first_coords, axis=1)
+
+        # define domain edges
+        x_edges = [x[0], x[-1]]
+        y_edges = [y[0], y[-1]]
+
+        # check if endpoints are not on domain edges
+        not_on_x_edge_first = ~np.isin(first_coords[:, 0], x_edges)
+        not_on_x_edge_last = ~np.isin(last_coords[:, 0], x_edges)
+        not_on_y_edge_first = ~np.isin(first_coords[:, 1], y_edges)
+        not_on_y_edge_last = ~np.isin(last_coords[:, 1], y_edges)
+
+        # check whether to close the contour segments or not
+        to_close = (distances <= threshold) & not_on_x_edge_first & not_on_y_edge_first & not_on_x_edge_last & not_on_y_edge_last
+        
+        # update contours: close those that meet the condition
+        contours = [
+            (np.append(seg[0], seg[0][0]) if to_close[i] else seg[0],
+             np.append(seg[1], seg[1][0]) if to_close[i] else seg[1])
+            for i, seg in enumerate(contours)
+        ]
 
     else:
         x_coordinates = np.array([])
