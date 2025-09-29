@@ -689,6 +689,10 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
 
         # check whether to close the contour segments or not
         to_close = (distances <= threshold) & not_on_x_edge_first & not_on_y_edge_first & not_on_x_edge_last & not_on_y_edge_last
+
+        # sort the closed contour around the reference point
+        if ref_point:
+            contours[0] = sorted(contours[0], key=lambda p: np.mod(np.atan2(p[1]-ref_point[1], p[0]-ref_point[0]),2*np.pi))
         
         # update contours: close those that meet the condition
         contours = [
