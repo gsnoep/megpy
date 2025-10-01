@@ -5,7 +5,7 @@ Module for tracing contour lines for level in field on a y,x grid.
 """
 import numpy as np
 
-from scipy import integrate, interpolate, optimize, spatial
+from scipy import interpolate, optimize, spatial
 
 from .utils import *
 
@@ -366,7 +366,7 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
             ref_dist = [np.min(np.linalg.norm(seg-ref_point, axis=1)) for seg in segments]
             segments = [segments[i] for i in np.argsort(ref_dist)]
     
-    segments = [(seg[:,0],seg[:,1]) for seg in segments]
+    #segments = [(seg[:,0],seg[:,1]) for seg in segments]
 
     return segments
 
@@ -671,8 +671,8 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         contours = sort2d(x_coordinates, y_coordinates, ref_point, threshold, x_point=x_point)
 
         # extract first and last points for all contours
-        first_coords = np.array([np.array([seg[0][0], seg[1][0]]) for seg in contours])
-        last_coords = np.array([np.array([seg[0][-1], seg[1][-1]]) for seg in contours])
+        first_coords = np.array([contour[0] for contour in contours])
+        last_coords =  np.array([contour[-1] for contour in contours])
         
         # compute distances between first and last points
         distances = np.linalg.norm(last_coords - first_coords, axis=1)
@@ -691,15 +691,17 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         to_close = (distances <= threshold) & not_on_x_edge_first & not_on_y_edge_first & not_on_x_edge_last & not_on_y_edge_last
 
         # sort the closed contour around the reference point
-        if ref_point:
-            contours[0] = sorted(contours[0], key=lambda p: np.mod(np.atan2(p[1]-ref_point[1], p[0]-ref_point[0]),2*np.pi))
+        if ref_point is not None:
+            deltas = contours[0] - ref_point
+            theta_xy = np.atan2(deltas[:,1], deltas[:,0])
+            theta_xy = np.mod(theta_xy, 2*np.pi, out=theta_xy)
+            i_sort_theta = np.argsort(theta_xy)
+            contours[0] = contours[0][i_sort_theta]
         
         # update contours: close those that meet the condition
-        contours = [
-            (np.append(seg[0], seg[0][0]) if to_close[i] else seg[0],
-             np.append(seg[1], seg[1][0]) if to_close[i] else seg[1])
-            for i, seg in enumerate(contours)
-        ]
+        contours = [np.vstack((contour, contour[0])) if to_close[i] else contour for i, contour in enumerate(contours)]
+
+        contours = [(contour[:,0],contour[:,1]) for contour in contours]
 
     else:
         x_coordinates = np.array([])
@@ -708,139 +710,3 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         contours = [(x_coordinates, y_coordinates)]
 
     return contours
-
-def contour_center(c):
-    """
-    Find the geometric center of a contour trace c given by c['X'], c['Y'].
-
-    Args:
-        `c` (dict): description of the contour, c={['X'],['Y'],['label'],...}, where:
-                    - X,Y: the contour coordinates, 
-                    - label is the normalised contour level label np.sqrt((level - center)/(threshold - center)).
-
-    Returns:
-        (dict): the contour with the extrema information added
-    """
-
-    # close the contour if not closed
-    c_ = copy.deepcopy(c)
-    if c_['X'][-1] != c_['X'][0] or c_['Y'][-1] != c_['Y'][0]:
-        c_['X'] = np.append(c_['X'],c_['X'][0])
-        c_['Y'] = np.append(c_['Y'],c_['Y'][0])
-
-    # find the average elevation (midplane) of the contour by computing the vertical centroid [Candy PPCF 51 (2009) 105009]
-    c['Y0'] = integrate.trapezoid(c_['X']*c_['Y'],c_['Y'])/integrate.trapezoid(c_['X'],c_['Y'])
-
-    # find the extrema of the contour in the radial direction at the average elevation
-    c = contour_extrema(c)
-
-    # compute the minor and major radii of the contour at the average elevation
-    c['r'] = (c['X_out']-c['X_in'])/2
-    c['X0'] = (c['X_out']+c['X_in'])/2
-    #c['X0'] = integrate.trapezoid(c['X']*c['Y'],c['X'])/integrate.trapezoid(c['Y'],c['X'])
-
-    return c
-
-def contour_extrema(c):
-    """
-    Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
-
-    Args:
-        `c` (dict): description of the contour, c={['X'],['Y'],['Y0'],['label'],...}, where:
-                    - X,Y: the contour coordinates, 
-                    - Y0 (optional): is the average elevation,
-                    - label is the normalised contour level label np.sqrt((level - center)/(threshold - center)).
-
-    Returns:
-        (dict): the contour with the extrema information added
-    """
-    # restack R_fs and Z_fs to get a continuous midplane outboard trace
-    X_in = c['X'][int(len(c['Y'])/2)-int(0.1*len(c['Y'])):int(len(c['Y'])/2)+int(0.1*len(c['Y']))]
-    X_out = np.hstack((c['X'][int(0.9*len(c['Y'])):],c['X'][:int(0.1*len(c['Y']))]))
-    
-    Y_in = c['Y'][int(len(c['Y'])/2)-int(0.1*len(c['Y'])):int(len(c['Y'])/2)+int(0.1*len(c['Y']))]
-    Y_out = np.hstack((c['Y'][int(0.9*len(c['Y'])):],c['Y'][:int(0.1*len(c['Y']))]))
-
-    # find the approximate(!) extrema in Y of the contour
-    Y_max = np.max(c['Y'])
-    Y_min = np.min(c['Y'])
-
-    # check if the midplane of the contour is provided
-    if 'Y0' not in c:
-        c['Y0'] = Y_min+((Y_max-Y_min)/2)
-
-    # find the extrema in X of the contour at the midplane
-    c['X_out'] = np.interp(c['Y0'],Y_out,X_out)
-    c['X_in'] = np.interp(c['Y0'],Y_in,X_in)
-
-    # in case level is out of bounds in these interpolations
-    if np.isnan(c['X_out']) or np.isinf(c['X_out']):
-        # restack X to get continuous trace on right side
-        X_ = np.hstack((c['X'][np.argmin(c['X']):],c['X'][:np.argmin(c['X'])]))
-        # take the derivative of X_
-        dX_ = np.gradient(X_,edge_order=2)
-        # find X_out by interpolating the derivative of X to 0.
-        dX_out =  dX_[np.argmax(dX_):np.argmin(dX_)]
-        X_out = X_[np.argmax(dX_):np.argmin(dX_)]
-        c['X_out'] = float(interpolate.interp1d(dX_out,X_out,bounds_error=False)(0.))
-    if np.isnan(c['X_in']) or np.isinf(c['X_in']):
-        dX = np.gradient(c['X'],edge_order=2)
-        dX_in =  dX[np.argmin(dX):np.argmax(dX)]
-        X_in = c['X'][np.argmin(dX):np.argmax(dX)]
-        c['X_in'] = float(interpolate.interp1d(dX_in,X_in,bounds_error=False)(0.))
-
-    # generate filter lists that take a representative slice of the max and min of the contour coordinates around the approximate Y_max and Y_min
-    alpha = (0.9+0.075*c['label']**2) # magic to ensure just enough points are 
-    max_filter = [z > alpha*(Y_max-c['Y0']) for z in c['Y']-c['Y0']]
-    min_filter = [z < alpha*(Y_min-c['Y0']) for z in c['Y']-c['Y0']]
-
-    # patch for the filter lists in case the filter criteria results in < 7 points (minimum of required for 5th order fit + 1)
-    i_Y_max = np.argmax(c['Y'])
-    i_Y_min = np.argmin(c['Y'])
-
-    if np.array(max_filter).sum() < 7:
-        for i in range(i_Y_max-3,i_Y_max+4):
-            if c['Y'][i] >= (np.min(c['Y'])+np.max(c['Y']))/2:
-                max_filter[i] = True
-
-    if np.array(min_filter).sum() < 7:
-        for i in range(i_Y_min-3,i_Y_min+4):
-            if c['Y'][i] <= (np.min(c['Y'])+np.max(c['Y']))/2:
-                min_filter[i] = True
-
-    # fit the max and min slices of the contour, compute the gradient of these fits and interpolate to zero to find X_Ymax, Y_max, X_Ymin and Y_min
-    X_Ymax_fit = np.linspace(c['X'][max_filter][-1],c['X'][max_filter][0],5000)
-    try:
-        Y_max_fit = interpolate.UnivariateSpline(c['X'][max_filter][::-1],c['Y'][max_filter][::-1],k=5)(X_Ymax_fit)
-    except:
-        Y_max_fit = np.poly1d(np.polyfit(c['X'][max_filter][::-1],c['Y'][max_filter][::-1],5))(X_Ymax_fit)
-    Y_max_fit_grad = np.gradient(Y_max_fit,X_Ymax_fit)
-
-    X_Ymax = interpolate.interp1d(Y_max_fit_grad,X_Ymax_fit,bounds_error=False)(0.)
-    Y_max = interpolate.interp1d(X_Ymax_fit,Y_max_fit,bounds_error=False)(X_Ymax)
-
-    X_Ymin_fit = np.linspace(c['X'][min_filter][-1],c['X'][min_filter][0],5000)
-    try:
-        Y_min_fit = interpolate.UnivariateSpline(c['X'][min_filter],c['Y'][min_filter],k=5)(X_Ymin_fit)
-    except:
-        Y_min_fit = np.poly1d(np.polyfit(c['X'][min_filter][::-1],c['Y'][min_filter][::-1],5))(X_Ymin_fit)
-    Y_min_fit_grad = np.gradient(Y_min_fit,X_Ymin_fit)
-
-    X_Ymin = interpolate.interp1d(Y_min_fit_grad,X_Ymin_fit,bounds_error=False)(0.)
-    Y_min = interpolate.interp1d(X_Ymin_fit,Y_min_fit,bounds_error=False)(X_Ymin)
-    
-    i_X_max = np.argmax(c['X'])
-    i_X_min = np.argmin(c['X'])
-
-    X_max = c['X'][i_X_max]
-    Y_Xmax = c['Y'][i_X_max]
-
-    X_min = c['X'][i_X_min]
-    Y_Xmin = c['Y'][i_X_min]
-
-    c.update({'X_Ymax':float(X_Ymax),'Y_max':float(Y_max),
-            'X_Ymin':float(X_Ymin),'Y_min':float(Y_min),
-            'X_min':float(X_min),'Y_Xmin':float(Y_Xmin),
-            'X_max':float(X_max),'Y_Xmax':float(Y_Xmax)})
-
-    return c
