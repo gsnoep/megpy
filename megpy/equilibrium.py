@@ -60,7 +60,7 @@ class Equilibrium():
         self.verbose = verbose
 
     ## I/O functions
-    def read_geqdsk(self,f_path=None,add_derived=False):
+    def read_geqdsk(self,f_path=None,check_consistency=False,add_derived=False):
         """Read an eqdsk g-file from file into `Equilibrium` object
 
         Args:
@@ -157,13 +157,14 @@ class Equilibrium():
                             comment_lines.append(str(line))
                 self.raw['comment'] = '\n'.join(comment_lines)
 
-            # sanity check the eqdsk values
-            for key in self._sanity_values:
-                # find the matching sanity key in eqdsk
-                sanity_pair = [keypair for keypair in self.raw.keys() if keypair.startswith(key)][1]
-                #print(sanity_pair)
-                if self.raw[key]!=self.raw[sanity_pair]:
-                    raise ValueError('Inconsistent '+key+': %7.4g, %7.4g'%(self.raw[key], self.raw[sanity_pair])+'. CHECK YOUR EQDSK FILE!')
+            if check_consistency:
+                # sanity check the eqdsk values
+                for key in self._sanity_values:
+                    # find the matching sanity key in eqdsk
+                    sanity_pair = [keypair for keypair in self.raw.keys() if keypair.startswith(key)][1]
+                    #print(sanity_pair)
+                    if self.raw[key]!=self.raw[sanity_pair]:
+                        raise ValueError('Inconsistent '+key+': %7.4g, %7.4g'%(self.raw[key], self.raw[sanity_pair])+'. CHECK YOUR EQDSK FILE!')
 
             if add_derived:
                 self.add_derived()
@@ -690,7 +691,7 @@ class Equilibrium():
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
                         #fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
-                        fs = tracer.contour(R,Z,psirz,psi_fs)
+                        fs = tracer.contour(R,Z,psirz,psi_fs,ref_point=np.array([derived['rmaxis'],derived['zmaxis']]))
                         tracer_timing += time.time()-time0
                         fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
                         if x_label != 'rho_tor' and 'rho_tor' in derived:
@@ -700,8 +701,8 @@ class Equilibrium():
                             if 'X' in key or 'Y' in key:
                                 _key = (key.replace('X','R')).replace('Y','Z')
                                 fs[_key] = fs.pop(key)
-                        del fs['label']
                         del fs['level']
+                        del fs['contours']
                         if not np.isfinite(fs['r']):
                             r_res = np.sqrt((R[i_rmaxis] - derived['rmaxis']) ** 2 + (Z[i_zmaxis] - derived['zmaxis']) ** 2)
                             fs['r'] = r_res * (psi_fs - derived['simag']) / (psirz[i_zmaxis,i_rmaxis] - derived['simag'])
@@ -786,7 +787,7 @@ class Equilibrium():
                                 lcfs[_key] = lcfs.pop(key)
                         lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
                     else:
-                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],kind='s',x_point=True)
+                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],ref_point=np.array([derived['rmaxis'],derived['zmaxis']]),kind='s',x_point=True)
                         #lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
                         keys = copy.deepcopy(list(lcfs.keys()))
                         for key in keys:
@@ -805,8 +806,8 @@ class Equilibrium():
                         if 'X' in key or 'Y' in key:
                             _key = (key.replace('X','R')).replace('Y','Z')
                             lcfs[_key] = lcfs.pop(key)
-                    del lcfs['label']
                     del lcfs['level']
+                    del lcfs['contours']
 
                     _incl_B = False
                     if incl_B:
@@ -988,13 +989,5 @@ class Equilibrium():
         
         self.derived['nw'] = nw
         self.derived['nh'] = nh
-
-        return self
-
-    def plot_derived(self,):
-
-        return self
-    
-    def plot_fluxsurfaces(self,):
 
         return self
