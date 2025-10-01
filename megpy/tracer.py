@@ -5,7 +5,7 @@ Module for tracing contour lines for level in field on a y,x grid.
 """
 import numpy as np
 
-from scipy import interpolate, optimize, spatial
+from scipy import integrate, interpolate, optimize, spatial
 
 from .utils import *
 
@@ -697,6 +697,9 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
             theta_xy = np.mod(theta_xy, 2*np.pi, out=theta_xy)
             i_sort_theta = np.argsort(theta_xy)
             contours[0] = contours[0][i_sort_theta]
+            theta_xy = theta_xy[i_sort_theta]
+            if to_close[0]:
+                theta_xy = np.hstack((theta_xy,theta_xy[0]))
         
         # update contours: close those that meet the condition
         contours = [np.vstack((contour, contour[0])) if to_close[i] else contour for i, contour in enumerate(contours)]
@@ -708,5 +711,124 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         y_coordinates = np.array([])
         
         contours = [(x_coordinates, y_coordinates)]
+    
+    contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'contours':contours}
+    if x_point and np.any(x_points):
+        contours.update({'x_points':x_points})
+    
+    contours = contour_center(contours)
 
     return contours
+
+def contour_center(c):
+    """
+    Find the geometric center of a contour trace c given by c['X'], c['Y'].
+
+    Args:
+        `c` (dict): description of the contour, c={['X'],['Y'],['label'],...}, where:
+                    - X,Y: the contour coordinates, 
+                    - label is the normalised contour level label np.sqrt((level - center)/(threshold - center)).
+
+    Returns:
+        (dict): the contour with the extrema information added
+    """
+
+    # close the contour if not closed
+    c_ = copy.deepcopy(c)
+    #if c_['X'][-1] != c_['X'][0] or c_['Y'][-1] != c_['Y'][0]:
+    #    c_['X'] = np.append(c_['X'],c_['X'][0])
+    #    c_['Y'] = np.append(c_['Y'],c_['Y'][0])
+
+    # find the average elevation (midplane) of the contour by computing the vertical centroid [Candy PPCF 51 (2009) 105009]
+    c['Y0'] = integrate.trapezoid(c_['X']*c_['Y'],c_['Y'])/integrate.trapezoid(c_['X'],c_['Y'])
+    #c['X0'] = integrate.trapezoid(c['X']*c['Y'],c['X'])/integrate.trapezoid(c['Y'],c['X'])
+
+    # find the extrema of the contour in the radial direction at the average elevation
+    c = contour_extrema(c)
+
+    # compute the minor and major radii of the contour at the average elevation
+    c['r'] = (c['X_out']-c['X_in'])/2
+    c['X0'] = (c['X_out']+c['X_in'])/2
+
+    return c
+
+def contour_extrema(c):
+    """
+    Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
+
+    """
+    with np.errstate(divide='ignore',invalid='ignore'):
+        # find the approximate(!) extrema in Y of the contour
+        Y_max = np.max(c['Y'])
+        Y_min = np.min(c['Y'])
+
+        # check if the midplane of the contour is provided
+        if 'Y0' not in c:
+            c['Y0'] = Y_min+((Y_max-Y_min)/2)
+        
+        if 'theta_XY' not in c:
+            c['theta_XY'] = np.mod(np.atan2(c['Y']-np.mean(c['Y']), c['X']-np.mean(c['X'])),2*np.pi)
+
+        # restack R_fs and Z_fs to get a continuous midplane outboard trace
+        mask_in = (c['theta_XY']>=0.5*np.pi) & (c['theta_XY']<=1.5*np.pi)
+        mask_out = np.hstack((np.where(c['theta_XY']>=1.5*np.pi),np.where(c['theta_XY']<=0.5*np.pi)))[0]
+
+        # compute R_in
+        X_in = c['X'][mask_in]
+        Y_in = c['Y'][mask_in]
+
+        # compute R_out
+        X_out = c['X'][mask_out]
+        Y_out = c['Y'][mask_out]
+
+        # find the extrema in X of the contour at the midplane
+        c['X_in'] = np.interp(c['Y0'], Y_in[::-1], X_in[::-1])
+        c['X_out'] = np.interp(c['Y0'], Y_out, X_out)
+
+        # find the extrema in Y of the contour
+        mask_top = (c['theta_XY']>=0.2*np.pi) & (c['theta_XY']<=1*np.pi)
+        mask_bottom = (c['theta_XY']>=1.2*np.pi) & (c['theta_XY']<=1.8*np.pi)
+
+        theta_top = c['theta_XY'][mask_top]
+        x_top = c['X'][mask_top]
+        y_top = c['Y'][mask_top]
+
+        theta_bottom = c['theta_XY'][mask_bottom]
+        x_bottom = c['X'][mask_bottom]
+        y_bottom = c['Y'][mask_bottom]
+
+        y_top_dtheta = np.gradient(y_top,theta_top)
+        y_bottom_dtheta = np.gradient(y_bottom,theta_bottom)
+
+        theta_max = np.interp(0,y_top_dtheta[::-1],theta_top[::-1])
+        Y_max = np.interp(theta_max,theta_top,y_top)
+        X_Ymax = np.interp(theta_max,theta_top,x_top)
+
+        if np.isnan(Y_max):
+            Y_max = np.max(y_top)
+            X_Ymax = x_top[np.where(y_top==Y_max)][0]
+
+        theta_min = np.interp(0,y_bottom_dtheta,theta_bottom)
+        Y_min = np.interp(theta_min,theta_bottom,y_bottom)
+        X_Ymin = np.interp(theta_min,theta_bottom,x_bottom)
+
+        if np.isnan(Y_min):
+            Y_min = np.min(y_bottom)
+            X_Ymin = x_bottom[np.where(y_bottom==Y_min)][0]
+        
+        i_X_max = np.argmax(c['X'])
+        i_X_min = np.argmin(c['X'])
+
+        X_max = c['X'][i_X_max]
+        Y_Xmax = c['Y'][i_X_max]
+
+        X_min = c['X'][i_X_min]
+        Y_Xmin = c['Y'][i_X_min]
+
+        c.update({'X_Ymax':float(X_Ymax), 'Y_max':float(Y_max),
+                'X_Ymin':float(X_Ymin), 'Y_min':float(Y_min),
+                'X_min':float(X_min),  'Y_Xmin':float(Y_Xmin),
+                'X_max':float(X_max), 'Y_Xmax':float(Y_Xmax)
+        })
+
+        return c
