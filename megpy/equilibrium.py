@@ -108,6 +108,9 @@ class Equilibrium():
                             try:
                                 # split the row string into separate values by ' ' as delimiter, adding a space before a minus sign if it is the delimiter
                                 values = list(filter(None,re.sub(r'(?<![Ee])-',' -',row).rstrip('\n').split(' ')))
+                                if current_row == 0:
+                                    for i in range(self._eqdsk_format[0]['size'][0]-len(values)):
+                                        values = ['UNKONWN'] + values
                                 # select all the numerical values in the list of sub-strings of the current row, but keep them as strings so the fortran formatting remains
                                 numbers = [j for i in [num for num in (re.findall(r'^(?![A-Z]).*-?\ *[0-9]+\.?[0-9]*(?:[Ee]\ *[-+]?\ *[0-9]+)?', value) for value in values)] for j in i]
                                 # select all the remaining sub-strings and store them in a separate list
