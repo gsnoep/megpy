@@ -787,7 +787,7 @@ class Equilibrium():
                                 lcfs[_key] = lcfs.pop(key)
                         lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
                     else:
-                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],ref_point=np.array([derived['rmaxis'],derived['zmaxis']]),kind='s',x_point=True)
+                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],ref_point=np.array([derived['rmaxis'],derived['zmaxis']]),kind='l',x_point=True)
                         #lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
                         keys = copy.deepcopy(list(lcfs.keys()))
                         for key in keys:
