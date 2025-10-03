@@ -646,6 +646,10 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         dx = x[1] - x[0]
         dy = y[1] - y[0]
 
+        # define domain edges
+        x_edges = [x[0], x[-1]]
+        y_edges = [y[0], y[-1]]
+
         # set nearest neighbor threshold
         threshold = np.sqrt((1.5 * dx)**2 + (1.5 * dy)**2)
 
@@ -678,10 +682,6 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         # compute distances between first and last points
         distances = np.linalg.norm(last_coords - first_coords, axis=1)
 
-        # define domain edges
-        x_edges = [x[0], x[-1]]
-        y_edges = [y[0], y[-1]]
-
         # check if endpoints are not on domain edges
         not_on_x_edge_first = ~np.isin(first_coords[:, 0], x_edges)
         not_on_x_edge_last = ~np.isin(last_coords[:, 0], x_edges)
@@ -694,8 +694,8 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         # sort the closed contour around the reference point
         if ref_point is not None:
             deltas = contours[0] - ref_point
-            theta_xy = np.atan2(deltas[:,1], deltas[:,0])
-            theta_xy = np.mod(theta_xy, 2*np.pi, out=theta_xy)
+            theta_xy = np.arctan2(deltas[:,1], deltas[:,0])
+            theta_xy = np.mod(theta_xy, 2*np.pi)
             i_sort_theta = np.argsort(theta_xy)
             contours[0] = contours[0][i_sort_theta]
             theta_xy = theta_xy[i_sort_theta]
@@ -721,7 +721,7 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
 
     return contours
 
-def contour_center(c,label=None):
+def contour_center(c):
     """
     Find the geometric center of a contour trace c given by c['X'], c['Y'].
 
@@ -775,7 +775,7 @@ def contour_extrema(c):
             c['Y0'] = Y_min+((Y_max-Y_min)/2)
         
         if 'theta_XY' not in c:
-            c['theta_XY'] = np.mod(np.atan2(c['Y']-np.mean(c['Y']), c['X']-np.mean(c['X'])),2*np.pi)
+            c['theta_XY'] = np.mod(np.arctan2(c['Y']-np.mean(c['Y']), c['X']-np.mean(c['X'])),2*np.pi)
 
         # restack R_fs and Z_fs to get a continuous midplane outboard trace
         mask_in = (c['theta_XY']>=0.5*np.pi) & (c['theta_XY']<=1.5*np.pi)
@@ -808,7 +808,7 @@ def contour_extrema(c):
         Y_Xmin = np.interp(theta_min,theta_out,Y_out)
 
         # generate filter lists that take a representative slice of the max and min of the contour coordinates around the approximate Y_max and Y_min
-        alpha = (0.9+0.000075*c['level']**2) # magic to ensure just enough points are selected for the fitting
+        alpha = (0.9+0.00005*c['level']**2) # magic to ensure just enough points are selected for the fitting
         max_filter = [z > alpha*(Y_max-c['Y0']) for z in c['Y']-c['Y0']]
         min_filter = [z < alpha*(Y_min-c['Y0']) for z in c['Y']-c['Y0']]
 
@@ -825,49 +825,61 @@ def contour_extrema(c):
             for i in range(i_Y_min-3,i_Y_min+4):
                 if c['Y'][i] <= (np.min(c['Y'])+np.max(c['Y']))/2:
                     min_filter[i] = True
-
+        
         theta_top = c['theta_XY'][max_filter]
         x_top = c['X'][max_filter]
         y_top = c['Y'][max_filter]
-
-        theta_top_fine = np.linspace(theta_top[0],theta_top[-1],10*len(theta_top))
 
         theta_bottom = c['theta_XY'][min_filter]
         x_bottom = c['X'][min_filter]
         y_bottom = c['Y'][min_filter]
 
-        theta_bottom_fine = np.linspace(theta_bottom[0],theta_bottom[-1],10*len(theta_bottom))
+        def fit_slice_and_interp_y_extremum(x, y, theta, n_multi=10):
+            theta_fine = np.linspace(theta[0],theta[-1],n_multi*len(theta))
+            try:
+                #try spline fit
+                try:
+                    y_fit = interpolate.UnivariateSpline(theta,y,k=5)(theta_fine)
+                # try polyfit
+                except:
+                    y_fit = np.poly1d(np.polyfit(theta,y,5))(theta_fine)
+                y_fit_grad = np.gradient(y_fit,theta_fine,edge_order=2)
 
-        # fit the max and min slices of the contour, compute the gradient of these fits and interpolate to zero to find X_Ymax, Y_max, X_Ymin and Y_min
-        try:
-            Y_max_fit = interpolate.UnivariateSpline(theta_top,y_top,k=5)(theta_top_fine)
-        except:
-            Y_max_fit = np.poly1d(theta_top,y_top,5)(theta_top_fine)
-        X_Ymax_fit = np.interp(theta_top_fine,theta_top,x_top)
-        Y_max_fit_grad = np.gradient(Y_max_fit,theta_top_fine,edge_order=2)
+                x_interp = np.interp(theta_fine,theta,x)
 
-        theta_Ymax = np.interp(0.,Y_max_fit_grad[::-1],theta_top_fine[::-1])
-        Y_max = np.interp(theta_Ymax,theta_top_fine,Y_max_fit)
-        X_Ymax = np.interp(theta_Ymax,theta_top_fine,X_Ymax_fit)
+                theta_extremum = interpolate.interp1d(y_fit_grad,theta_fine)(0.)
+                y_extremum = np.interp(theta_extremum,theta_fine,y_fit)
+                x_y_extremum = np.interp(theta_extremum,theta_fine,x_interp)
+            # fall back to argmax
+            except:
+                i_y_extremum = np.argmax(y)
+                y_extremum = y[i_y_extremum]
+                x_y_extremum = x[i_y_extremum]
+            
+            # plot to check
+            #plt.plot(x,y,'r.')
+            #plt.plot(x_interp,y_fit,'g-')
+            #plt.axis('equal')
+            
+            return x_y_extremum,y_extremum
 
-        try:
-            Y_min_fit = interpolate.UnivariateSpline(theta_bottom,y_bottom,k=5)(theta_bottom_fine)
-        except:
-            Y_min_fit = np.poly1d(np.polyfit(theta_bottom,y_bottom,5))(theta_bottom_fine)
-        X_Ymin_fit = np.interp(theta_bottom_fine,theta_bottom,x_bottom)
-        Y_min_fit_grad = np.gradient(Y_min_fit,theta_bottom_fine,edge_order=2)
+        if 'x_points' not in c:
+            # fit the max and min slices of the contour, compute the gradient of these fits and interpolate to zero to find X_Ymax, Y_max, X_Ymin and Y_min
+            X_Ymax, Y_max = fit_slice_and_interp_y_extremum(x_top,y_top,theta_top)
+            X_Ymin, Y_min = fit_slice_and_interp_y_extremum(x_bottom,y_bottom,theta_bottom)
 
-        theta_Ymin = np.interp(0.,Y_min_fit_grad,theta_bottom_fine)
-        Y_min = np.interp(theta_Ymin,theta_bottom_fine,Y_min_fit)
-        X_Ymin = np.interp(theta_Ymin,theta_bottom_fine,X_Ymin_fit)
+        else:
+            if 'x_points' in c and np.any(c['x_points'][:,1]>0):
+                Y_max = np.max(c['Y'])
+                X_Ymax = c['X'][np.where(c['Y']==Y_max)][0]
+            else:
+                X_Ymax, Y_max = fit_slice_and_interp_y_extremum(x_top,y_top,theta_top)
 
-        if np.isnan(Y_max) or ('x_points' in c and np.any(c['x_points'][:,1]>0)):
-            Y_max = np.max(c['Y'])
-            X_Ymax = c['X'][np.where(c['Y']==Y_max)][0]
-
-        if np.isnan(Y_min) or ('x_points' in c and np.any(c['x_points'][:,1]<0)):
-            Y_min = np.min(c['Y'])
-            X_Ymin = c['X'][np.where(c['Y']==Y_min)][0]
+            if 'x_points' in c and np.any(c['x_points'][:,1]<0):
+                Y_min = np.min(c['Y'])
+                X_Ymin = c['X'][np.where(c['Y']==Y_min)][0]
+            else:
+                X_Ymin, Y_min = fit_slice_and_interp_y_extremum(x_bottom,y_bottom,theta_bottom)
 
         c.update({'X_Ymax':float(X_Ymax),'Y_max':float(Y_max),
                 'X_Ymin':float(X_Ymin),'Y_min':float(Y_min),
