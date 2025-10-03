@@ -632,8 +632,8 @@ class Equilibrium():
                     self.add_derived()
                 fluxsurfaces = self.fluxsurfaces
 
-                if refine and derived['nw'] != refine*derived['nw']:
-                    self.refine(nw=refine*derived['nw'],nh=refine*derived['nh'],self_consistent=False)
+                if refine and derived['nw'] != refine*raw['nw']:
+                    self.refine(nw=refine*raw['nw'],nh=refine*raw['nh'],self_consistent=False)
                     self.add_derived()
                 
                 R = copy.deepcopy(derived['R'])
@@ -667,15 +667,6 @@ class Equilibrium():
                         x_list = self.derived['psi'][1:]
                 else:
                     x_list = list(x)
-                
-                threshold = derived['sibry']
-                interp_method = 'normal'
-                if np.max(psirz[np.where(psirz!=0.0)]) <= threshold:
-                    threshold = np.max(psirz[np.where(psirz!=0.0)])
-                #    interp_method = 'bounded_extrapolation'
-                elif np.min(psirz[np.where(psirz!=0.0)]) >= threshold:
-                    threshold = np.min(psirz[np.where(psirz!=0.0)])
-                #    interp_method = 'bounded_extrapolation'
 
                 tracer_timing = 0.
                 analytic_timing = 0.
@@ -685,7 +676,7 @@ class Equilibrium():
                         stdout.write('\r {}% completed'.format(round(100*(find(x_fs,x_list)+1)/len(x_list))))
                         stdout.flush()
                     # check that rho stays inside the lcfs
-                    if x_fs > 0 and x_fs < 0.999:
+                    if x_fs < x_list[-1]:
                         # compute the psi level of the flux surface
                         psi_fs = float(interpolate.interp1d(derived[x_label],derived['psi'])(x_fs))
                         q_fs = float(interpolate.interp1d(derived[x_label],derived['qpsi'])(x_fs))
@@ -693,7 +684,6 @@ class Equilibrium():
 
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
-                        #fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
                         fs = tracer.contour(R,Z,psirz,psi_fs,ref_point=np.array([derived['rmaxis'],derived['zmaxis']]))
                         tracer_timing += time.time()-time0
                         fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
