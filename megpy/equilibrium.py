@@ -472,7 +472,7 @@ class Equilibrium():
         return out
 
     ## physics functions
-    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,tracer_diag=None,verbose=False):
+    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,verbose=False):
         """Add quantities derived from the raw `Equilibrium.read_geqdsk()` output, such as phi, rho_pol, rho_tor to the `Equilibrium` object.
         Can also be called directly if `f_path` is defined.
 
@@ -553,7 +553,9 @@ class Equilibrium():
             derived['R_x'] = derived['rbbbs'][i_xpoint_Z]
             derived['Z_x'] = derived['zbbbs'][i_xpoint_Z]
 
-            bbbs_center = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
+            lcfs = tracer.contour(derived['R'],derived['Z'],derived['psirz'],derived['sibry'],kind='l',x_point=True)
+
+            bbbs_center = tracer.contour_center({'X':lcfs['X'],'Y':lcfs['Y'],'level':derived['sibry'],'label':1.0})
 
             derived['R0'] = bbbs_center['X0']
             derived['Z0'] = bbbs_center['Y0']
@@ -597,14 +599,14 @@ class Equilibrium():
         derived['B_tor_rz'] = interpolate.interp1d(derived['psi'],derived['fpol'],bounds_error=False,fill_value='extrapolate')(derived['psirz'])/R
 
         if incl_fluxsurfaces:
-            self.add_fluxsurfaces(refine=refine,analytic_shape=analytic_shape,incl_B=incl_B,tracer_diag=tracer_diag)
+            self.add_fluxsurfaces(refine=refine,analytic_shape=analytic_shape,incl_B=incl_B)
               
         if just_derived:
             return self.derived 
         else:
             return self
 
-    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,analytic_shape=False,incl_B=False,force_boundary=True,tracer_diag=None,verbose=False):
+    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,analytic_shape=False,incl_B=False,force_boundary=True,verbose=False):
         """Add flux surfaces to an `Equilibrium`.
         
         Args:
@@ -640,24 +642,9 @@ class Equilibrium():
                 Z = copy.deepcopy(derived['Z'])
                 psirz = copy.deepcopy(derived['psirz'])
 
-                if tracer_diag == 'mesh':
-                    fig = plt.figure()
-                    ax = fig.add_subplot(projection='3d')
-                    R_,Z_ = np.meshgrid(R,Z)
-                    ax.plot_wireframe(R_,Z_,psirz, rstride=10, cstride=10)
-                    ax.set_xlabel('R [m]')
-                    ax.set_ylabel('Z [m]')
-                    ax.set_zlabel('$\\Psi$')
-                    plt.show()
-
                 # find the approximate location of the magnetic axis on the psirz map
                 i_rmaxis = find(self.derived['rmaxis'],R)
                 i_zmaxis = find(self.derived['zmaxis'],Z)
-
-                if tracer_diag:
-                    plt.figure()
-                    if tracer_diag == 'fs':
-                        plt.plot(derived['rmaxis'],derived['zmaxis'],'bx')
 
                 # add the flux surface data for rho_tor > 0
                 if not x:
@@ -667,6 +654,8 @@ class Equilibrium():
                         x_list = self.derived['psi'][1:]
                 else:
                     x_list = list(x)
+                
+                mag_axis = tracer.find_o_points(derived['R'], derived['Z'], derived['psirz'],derived['psi'][0])[0]
 
                 tracer_timing = 0.
                 analytic_timing = 0.
@@ -684,7 +673,7 @@ class Equilibrium():
 
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
-                        fs = tracer.contour(R,Z,psirz,psi_fs,ref_point=np.array([derived['rmaxis'],derived['zmaxis']]))
+                        fs = tracer.contour(R,Z,psirz,psi_fs,ref_point=mag_axis) #ref_point=np.array([derived['rmaxis'],derived['zmaxis']]))
                         tracer_timing += time.time()-time0
                         fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
                         if x_label != 'rho_tor' and 'rho_tor' in derived:
@@ -727,9 +716,9 @@ class Equilibrium():
                                 _incl_B = incl_B
 
                         if _incl_B:
-
                             B_pol_fs = 0.0
                             B_tor_fs = fs['fpol'] / fs['R0']
+                            
                             if len(fs['R']) > 5:
                                 # to speed up the Bpol interpolation generate a reduced Z,R mesh
                                 i_R_in = find(fs['R_in'],self.derived['R'])-2
@@ -741,9 +730,6 @@ class Equilibrium():
 
                                 # interpolate Bpol and Btor
                                 B_pol_fs = interpolate.griddata(RZ_mesh,self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out].flatten(),(fs['Z'],fs['R']),method='cubic')
-                                #B_pol_fs = np.array([])
-                                #for i_R,RR in enumerate(fs['R']):
-                                #    B_pol_fs = np.append(B_pol_fs,interpolate.interp2d(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max],self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out],bounds_error=False,fill_value='extrapolate')(RR,fs['Z'][i_R]))
                                 B_tor_fs = interpolate.interp1d(self.derived['psi'],self.derived['fpol'],bounds_error=False)(np.array([psi_fs]))[0]/fs['R']
                             fs.update({'Bpol':B_pol_fs, 'Btor':B_tor_fs, 'B':np.sqrt(B_pol_fs**2+B_tor_fs**2)})
 
@@ -765,9 +751,6 @@ class Equilibrium():
                     stdout.write('\n')
                     print('tracer time:{:.3f}s / flux-surface'.format(tracer_timing))
                     print('analytic extraction time:{:.3f}s / flux-surface'.format(analytic_timing))
-                
-                if tracer_diag == 'fs':
-                    plt.show()
 
                 if not x:
                     if 'rbbbs' in raw and 'zbbbs' in raw and not force_boundary:
@@ -780,8 +763,7 @@ class Equilibrium():
                                 lcfs[_key] = lcfs.pop(key)
                         lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
                     else:
-                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],ref_point=np.array([derived['rmaxis'],derived['zmaxis']]),kind='l',x_point=True)
-                        #lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
+                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],ref_point=mag_axis,kind='l',x_point=True)
                         keys = copy.deepcopy(list(lcfs.keys()))
                         for key in keys:
                             if 'X' in key or 'Y' in key:
@@ -869,7 +851,7 @@ class Equilibrium():
                 derived['Zo'] = np.array(fluxsurfaces['Z0'])
                 derived['Z0'] = derived['Zo'][-1] # average elevation of the lcfs
                 derived['r'] = np.array(fluxsurfaces['r'])
-                if x and 'rbbbs' and 'zbbbs' in raw:
+                if x and 'rbbbs' and 'zbbbs' in raw and not force_boundary:
                     derived['a'] = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})['r']
                 else:
                     derived['a'] = derived['r'][-1] # midplane average minor radius of the lcfs
