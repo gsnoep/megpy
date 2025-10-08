@@ -366,8 +366,6 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
             # compute the minimum distance to the reference point for all segments
             ref_dist = [np.min(np.linalg.norm(seg-ref_point, axis=1)) for seg in segments]
             segments = [segments[i] for i in np.argsort(ref_dist)]
-    
-    #segments = [(seg[:,0],seg[:,1]) for seg in segments]
 
     return segments
 
@@ -481,7 +479,7 @@ def find_nulls(x, y, field, threshold=1e-6):
 
     return null_points
 
-def null_classifier(nulls, x, y, field, level=None, atol=1e-3, delta=1e-5, eigtol=1e-10):
+def null_classifier(nulls, x, y, field, level=None, rtol=5e-4, atol=1e-3, delta=1e-5, eigtol=1e-10):
     """
     Classify null points as O-points (local minima/maxima) or X-points (saddle points) based on the
     Hessian matrix of the field.
@@ -503,7 +501,7 @@ def null_classifier(nulls, x, y, field, level=None, atol=1e-3, delta=1e-5, eigto
             shape (m, 2) with [x, y] coordinates of classified points.
     """
     # create interpolator for level filtering and second derivatives
-    interpolator = interpolate.RegularGridInterpolator((x, y), field.T, method='cubic', bounds_error=False, fill_value=np.nan)
+    interpolator = interpolate.RectBivariateSpline(x, y, field.T, kx=3, ky=3, s=0)
 
     if len(nulls) == 0:
         return {'o-points': [], 'x-points': []}
@@ -519,15 +517,15 @@ def null_classifier(nulls, x, y, field, level=None, atol=1e-3, delta=1e-5, eigto
     points_yx_minus = nulls + np.array([-delta, -delta])
     
     # evaluate field interpolator at all points
-    val = interpolator(nulls)
-    val_x_plus = interpolator(points_x_plus)
-    val_x_minus = interpolator(points_x_minus)
-    val_y_plus = interpolator(points_y_plus)
-    val_y_minus = interpolator(points_y_minus)
-    val_xy_plus = interpolator(points_xy_plus)
-    val_xy_minus = interpolator(points_xy_minus)
-    val_yx_plus = interpolator(points_yx_plus)
-    val_yx_minus = interpolator(points_yx_minus)
+    val = interpolator(nulls[:,0],nulls[:,1],grid=False)
+    val_x_plus = interpolator(points_x_plus[:,0],points_x_plus[:,1],grid=False)
+    val_x_minus = interpolator(points_x_minus[:,0],points_x_minus[:,1],grid=False)
+    val_y_plus = interpolator(points_y_plus[:,0],points_y_plus[:,1],grid=False)
+    val_y_minus = interpolator(points_y_minus[:,0],points_y_minus[:,1],grid=False)
+    val_xy_plus = interpolator(points_xy_plus[:,0],points_xy_plus[:,1],grid=False)
+    val_xy_minus = interpolator(points_xy_minus[:,0],points_xy_minus[:,1],grid=False)
+    val_yx_plus = interpolator(points_yx_plus[:,0],points_yx_plus[:,1],grid=False)
+    val_yx_minus = interpolator(points_yx_minus[:,0],points_yx_minus[:,1],grid=False)
     
     # compute second derivatives using finite differences
     d2dx2_field = (val_x_plus - 2 * val + val_x_minus) / (delta**2)
@@ -554,16 +552,20 @@ def null_classifier(nulls, x, y, field, level=None, atol=1e-3, delta=1e-5, eigto
 
     # filter nulls by level if provided
     if level is not None:
-        o_values = interpolator(o_points)
-        x_values = interpolator(x_points)
-        o_mask = np.abs(o_values - level) <= atol
-        x_mask = np.abs(x_values - level) <= atol
+        o_values = interpolator(o_points[:,0],o_points[:,1],grid=False)
+        x_values = interpolator(x_points[:,0],x_points[:,1],grid=False)
+        if level != 0.:
+            o_mask = np.abs(np.abs(o_values - level)/level) <= rtol
+            x_mask = np.abs(np.abs(x_values - level)/level) <= rtol
+        else:
+            o_mask = np.abs(o_values - level) <= atol
+            x_mask = np.abs(x_values - level) <= atol
         o_points = o_points[o_mask]
         x_points = x_points[x_mask]
     
     return {'o-points': o_points, 'x-points': x_points}
 
-def find_x_points(x, y, field, level=None, atol=1e-3):
+def find_x_points(x, y, field, level=None, rtol=5e-4, atol=1e-3):
     """
     Find X-points (saddle points) in a 2D field.
 
@@ -579,9 +581,9 @@ def find_x_points(x, y, field, level=None, atol=1e-3):
         numpy.ndarray: Array of shape (m, 2) containing [x, y] coordinates of X-points.
     """
     nulls = find_nulls(x, y, field)
-    return null_classifier(nulls, x, y, field, level=level, atol=atol)['x-points']
+    return null_classifier(nulls, x, y, field, level=level, rtol=rtol, atol=atol)['x-points']
 
-def find_o_points(x, y, field, level=None, atol=1e-3):
+def find_o_points(x, y, field, level=None, rtol=1e-3, atol=1e-3):
     """
     Find O-points (local minima or maxima) in a 2D vector field.
 
@@ -597,9 +599,24 @@ def find_o_points(x, y, field, level=None, atol=1e-3):
         numpy.ndarray: Array of shape (m, 2) containing [x, y] coordinates of O-points.
     """
     nulls = find_nulls(x, y, field)
-    return null_classifier(nulls, x, y, field, level=level, atol=atol)['o-points']
+    o_points = null_classifier(nulls, x, y, field, level=level, rtol=rtol, atol=atol)['o-points']
+    
+    # if no o-points can be found > refine the field
+    if not np.any(o_points):
+        n_refine = 2
+        _x = np.linspace(x[0],x[-1],n_refine*len(x))
+        _y = np.linspace(y[0],y[-1],n_refine*len(y))
+    
+        _old_x,_old_y = np.meshgrid(x,y)
+        old_xy = np.column_stack((_old_x.flatten(),_old_y.flatten()))
+        _field = interpolate.griddata(old_xy,field.flatten(),(np.meshgrid(_x,_y)),method='cubic')
+    
+        _nulls = find_nulls(_x, _y, _field)
+        o_points = null_classifier(_nulls, _x, _y, _field, level=level, rtol=rtol, atol=atol)['o-points']
 
-def find_null_points(x, y, field, level=None, atol=1e-3):
+    return o_points
+
+def find_null_points(x, y, field, level=None, rtol=1e-3, atol=1e-3):
     """
     Find and classify all null points (O-points and X-points) in a 2D vector field.
 
@@ -616,7 +633,7 @@ def find_null_points(x, y, field, level=None, atol=1e-3):
             shape (m, 2) with [x, y] coordinates of classified points.
     """
     nulls = find_nulls(x, y, field)
-    return null_classifier(nulls, x, y, field, level=level, atol=atol)
+    return null_classifier(nulls, x, y, field, level=level, rtol=rtol, atol=atol)
 
 # contour methods
 def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
@@ -659,7 +676,7 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
 
             if np.any(x_points):
                 # compute elimination radius
-                radius = np.sqrt((.85 * dx)**2 + (.85 * dy)**2)
+                radius = np.sqrt((1 * dx)**2 + (1 * dy)**2)
 
                 # increase threshold
                 threshold = np.sqrt((2 * dx)**2 + (2 * dy)**2)
@@ -694,13 +711,16 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         # sort the closed contour around the reference point
         if ref_point is not None:
             deltas = contours[0] - ref_point
-            theta_xy = np.arctan2(deltas[:,1], deltas[:,0])
-            theta_xy = np.mod(theta_xy, 2*np.pi)
-            i_sort_theta = np.argsort(theta_xy)
-            contours[0] = contours[0][i_sort_theta]
-            theta_xy = theta_xy[i_sort_theta]
-            if to_close[0]:
-                theta_xy = np.hstack((theta_xy,theta_xy[0]))
+        else:
+            deltas = contours[0] - np.mean(np.vstack((contours[0], contours[0][0])),axis=0)
+
+        theta_xy = np.arctan2(deltas[:,1], deltas[:,0])
+        theta_xy = np.mod(theta_xy, 2*np.pi)
+        i_sort_theta = np.argsort(theta_xy)
+        contours[0] = contours[0][i_sort_theta]
+        theta_xy = theta_xy[i_sort_theta]
+        if to_close[0]:
+            theta_xy = np.hstack((theta_xy,theta_xy[0]))
         
         # update contours: close those that meet the condition
         contours = [np.vstack((contour, contour[0])) if to_close[i] else contour for i, contour in enumerate(contours)]
@@ -713,7 +733,7 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         
         contours = [(x_coordinates, y_coordinates)]
     
-    contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'contours':contours}
+    contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'label':np.sqrt((level-np.min(field))/(np.max(field)-np.min(field))), 'contours':contours}
     if x_point and np.any(x_points):
         contours.update({'x_points':x_points})
     
@@ -734,14 +754,8 @@ def contour_center(c):
         (dict): the contour with the extrema information added
     """
 
-    # close the contour if not closed
-    c_ = copy.deepcopy(c)
-    #if c_['X'][-1] != c_['X'][0] or c_['Y'][-1] != c_['Y'][0]:
-    #    c_['X'] = np.append(c_['X'],c_['X'][0])
-    #    c_['Y'] = np.append(c_['Y'],c_['Y'][0])
-
     # find the average elevation (midplane) of the contour by computing the vertical centroid [Candy PPCF 51 (2009) 105009]
-    c['Y0'] = integrate.trapezoid(c_['X']*c_['Y'],c_['Y'])/integrate.trapezoid(c_['X'],c_['Y'])
+    c['Y0'] = integrate.trapezoid(c['X']*c['Y'],c['Y'])/integrate.trapezoid(c['X'],c['Y'])
     #c['X0'] = integrate.trapezoid(c['X']*c['Y'],c['X'])/integrate.trapezoid(c['Y'],c['X'])
 
     # find the extrema of the contour in the radial direction at the average elevation
@@ -753,7 +767,7 @@ def contour_center(c):
 
     return c
 
-def contour_extrema(c):
+def contour_extrema(c,plot_debug=True):
     """Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
 
     Args:
@@ -777,62 +791,76 @@ def contour_extrema(c):
         if 'theta_XY' not in c:
             c['theta_XY'] = np.mod(np.arctan2(c['Y']-np.mean(c['Y']), c['X']-np.mean(c['X'])),2*np.pi)
 
-        # restack R_fs and Z_fs to get a continuous midplane outboard trace
+        # compute X_in
         mask_in = (c['theta_XY']>=0.5*np.pi) & (c['theta_XY']<=1.5*np.pi)
-        mask_out = np.hstack((np.where(c['theta_XY']>=1.5*np.pi),np.where(c['theta_XY']<=0.5*np.pi)))[0]
-
-        # compute R_in
+        
+        # try to patch masks in case the filter criteria result in < 7 points
+        i_X_min = np.argmin(c['X'])
+        if np.array(mask_in).sum() < 7:
+            for i in range(i_X_min-3,i_X_min+4):
+                if i < len(c['X']) and c['X'][i] >= (np.min(c['X'])+np.max(c['X']))/2:
+                    mask_in[i] = True
+        
         X_in = c['X'][mask_in]
         Y_in = c['Y'][mask_in]
 
-        # compute R_out
+        c['X_in'] = np.interp(c['Y0'], Y_in[::-1], X_in[::-1])
+        theta_in = c['theta_XY'][mask_in]
+        x_in_dtheta = np.gradient(X_in,theta_in)
+
+        theta_xmin = np.interp(0,x_in_dtheta,theta_in)
+        X_min = np.interp(theta_xmin,theta_in,X_in)
+        Y_Xmin = np.interp(theta_xmin,theta_in,Y_in)
+
+        # compute X_out
+        mask_out = np.hstack((np.where(c['theta_XY']>=1.5*np.pi),np.where(c['theta_XY']<=0.5*np.pi)))[0]
+        
+        i_X_max = np.argmax(c['X'])
+        if np.array(mask_out).sum() < 7:
+            for i in range(i_X_max-3,i_X_max+4):
+                if i < len(c['X']) and c['X'][i] <= (np.min(c['X'])+np.max(c['X']))/2:
+                    mask_out[i] = True
+
         X_out = c['X'][mask_out]
         Y_out = c['Y'][mask_out]
 
-        # find the extrema in X of the contour at the midplane
-        c['X_in'] = np.interp(c['Y0'], Y_in[::-1], X_in[::-1])
         c['X_out'] = np.interp(c['Y0'], Y_out, X_out)
-
-        theta_in = c['theta_XY'][mask_in]
         theta_out = c['theta_XY'][mask_out]
-
-        x_in_dtheta = np.gradient(X_in,theta_in)
         x_out_dtheta = np.gradient(X_out,theta_out)
 
         theta_xmax = np.interp(0,x_out_dtheta,theta_out)
         X_max = np.interp(theta_xmax,theta_out,X_out)
         Y_Xmax = np.interp(theta_xmax,theta_out,Y_out)
 
-        theta_min = np.interp(0,x_in_dtheta,theta_in)
-        X_min = np.interp(theta_min,theta_out,X_out)
-        Y_Xmin = np.interp(theta_min,theta_out,Y_out)
-
         # generate filter lists that take a representative slice of the max and min of the contour coordinates around the approximate Y_max and Y_min
-        alpha = (0.9+0.00005*c['level']**2) # magic to ensure just enough points are selected for the fitting
-        max_filter = [z > alpha*(Y_max-c['Y0']) for z in c['Y']-c['Y0']]
-        min_filter = [z < alpha*(Y_min-c['Y0']) for z in c['Y']-c['Y0']]
-
-        # patch for the filter lists in case the filter criteria results in < 7 points (minimum of required for 5th order fit + 1)
-        i_Y_max = np.argmax(c['Y'])
-        i_Y_min = np.argmin(c['Y'])
-
-        if np.array(max_filter).sum() < 7:
-            for i in range(i_Y_max-3,i_Y_max+4):
-                if c['Y'][i] >= (np.min(c['Y'])+np.max(c['Y']))/2:
-                    max_filter[i] = True
-
-        if np.array(min_filter).sum() < 7:
-            for i in range(i_Y_min-3,i_Y_min+4):
-                if c['Y'][i] <= (np.min(c['Y'])+np.max(c['Y']))/2:
-                    min_filter[i] = True
+        alpha = (0.9+0.001*c['level']**2) # magic to ensure just enough points are selected for the fitting
         
-        theta_top = c['theta_XY'][max_filter]
-        x_top = c['X'][max_filter]
-        y_top = c['Y'][max_filter]
+        mask_top = [z > alpha*(Y_max-c['Y0']) for z in c['Y']-c['Y0']]
+        # try to patch masks in case the filter criteria result in < 7 points (minimum of required for 5th order fit + 1)
+        if np.array(mask_top).sum() < 7:
+            i_Y_max = np.argmax(c['Y'])
+            for i in range(i_Y_max-3,i_Y_max+4):
+                if i > 0 and i < len(c['Y']) and c['theta_XY'][i] > 0 and c['theta_XY'][i] < np.pi:
+                    mask_top[i] = True
+        
+        theta_top = c['theta_XY'][mask_top]
+        x_top = c['X'][mask_top]
+        y_top = c['Y'][mask_top]
+        
+        mask_bottom = [z < alpha*(Y_min-c['Y0']) for z in c['Y']-c['Y0']]
+        # try to patch masks in case the filter criteria result in < 7 points (minimum of required for 5th order fit + 1)
+        if np.array(mask_bottom).sum() < 7:
+            i_Y_min = np.argmin(c['Y'])
+            for i in range(i_Y_min-3,i_Y_min+4):
+                if i > 0 and i < len(c['Y']) and c['theta_XY'][i] > np.pi and c['theta_XY'][i] < 2*np.pi:
+                    mask_bottom[i] = True
 
-        theta_bottom = c['theta_XY'][min_filter]
-        x_bottom = c['X'][min_filter]
-        y_bottom = c['Y'][min_filter]
+        theta_bottom = c['theta_XY'][mask_bottom]
+        x_bottom = c['X'][mask_bottom]
+        y_bottom = c['Y'][mask_bottom]
+
+        if plot_debug:
+            plt.plot(c['X'],c['Y'])
 
         def fit_slice_and_interp_y_extremum(x, y, theta, n_multi=10):
             theta_fine = np.linspace(theta[0],theta[-1],n_multi*len(theta))
@@ -842,7 +870,10 @@ def contour_extrema(c):
                     y_fit = interpolate.UnivariateSpline(theta,y,k=5)(theta_fine)
                 # try polyfit
                 except:
-                    y_fit = np.poly1d(np.polyfit(theta,y,5))(theta_fine)
+                    if len(y) < 7:
+                        y_fit = np.poly1d(np.polyfit(theta,y,3))(theta_fine)
+                    else:
+                        y_fit = np.poly1d(np.polyfit(theta,y,5))(theta_fine)
                 y_fit_grad = np.gradient(y_fit,theta_fine,edge_order=2)
 
                 x_interp = np.interp(theta_fine,theta,x)
@@ -852,15 +883,16 @@ def contour_extrema(c):
                 x_y_extremum = np.interp(theta_extremum,theta_fine,x_interp)
             # fall back to argmax
             except:
-                i_y_extremum = np.argmax(y)
+                i_y_extremum = np.argmax(np.abs(y))
                 y_extremum = y[i_y_extremum]
                 x_y_extremum = x[i_y_extremum]
             
             # plot to check
-            #plt.plot(x,y,'r.')
-            #plt.plot(x_interp,y_fit,'g-')
-            #plt.axis('equal')
-            
+            if plot_debug:
+                plt.plot(x,y,'r.')
+                plt.plot(x_interp,y_fit,'g-')
+                plt.plot(x_y_extremum,y_extremum,'o',markerfacecolor='none')
+
             return x_y_extremum,y_extremum
 
         if 'x_points' not in c:
