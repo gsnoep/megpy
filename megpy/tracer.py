@@ -813,7 +813,9 @@ def contour_extrema(c,plot_debug=False):
         Y_Xmin = np.interp(theta_xmin,theta_in,Y_in)
 
         # compute X_out
-        mask_out = np.hstack((np.where(c['theta_XY']>=1.5*np.pi),np.where(c['theta_XY']<=0.5*np.pi)))[0]
+        i_out_lower = np.where(c['theta_XY']>=1.5*np.pi)
+        i_out_upper = np.where(c['theta_XY']<=0.5*np.pi)
+        mask_out = np.hstack((i_out_lower,i_out_upper))[0]
         
         i_X_max = np.argmax(c['X'])
         if np.array(mask_out).sum() < 7:
@@ -825,7 +827,7 @@ def contour_extrema(c,plot_debug=False):
         Y_out = c['Y'][mask_out]
 
         c['X_out'] = np.interp(c['Y0'], Y_out, X_out)
-        theta_out = c['theta_XY'][mask_out]
+        theta_out = np.hstack((c['theta_XY'][i_out_lower],c['theta_XY'][i_out_upper]+2*np.pi))
         x_out_dtheta = np.gradient(X_out,theta_out)
 
         theta_xmax = np.interp(0,x_out_dtheta,theta_out)
