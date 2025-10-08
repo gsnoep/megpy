@@ -767,7 +767,7 @@ def contour_center(c):
 
     return c
 
-def contour_extrema(c,plot_debug=True):
+def contour_extrema(c,plot_debug=False):
     """Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
 
     Args:
@@ -832,13 +832,12 @@ def contour_extrema(c,plot_debug=True):
         X_max = np.interp(theta_xmax,theta_out,X_out)
         Y_Xmax = np.interp(theta_xmax,theta_out,Y_out)
 
-        # generate filter lists that take a representative slice of the max and min of the contour coordinates around the approximate Y_max and Y_min
-        alpha = (0.9+0.001*c['level']**2) # magic to ensure just enough points are selected for the fitting
+        i_Y_max = np.argmax(c['Y'])
+        theta_ymax = c['theta_XY'][i_Y_max]
         
-        mask_top = [z > alpha*(Y_max-c['Y0']) for z in c['Y']-c['Y0']]
+        mask_top = (c['theta_XY']>=0.985*theta_ymax) & (c['theta_XY']<=1.015*theta_ymax)
         # try to patch masks in case the filter criteria result in < 7 points (minimum of required for 5th order fit + 1)
         if np.array(mask_top).sum() < 7:
-            i_Y_max = np.argmax(c['Y'])
             for i in range(i_Y_max-3,i_Y_max+4):
                 if i > 0 and i < len(c['Y']) and c['theta_XY'][i] > 0 and c['theta_XY'][i] < np.pi:
                     mask_top[i] = True
@@ -847,10 +846,12 @@ def contour_extrema(c,plot_debug=True):
         x_top = c['X'][mask_top]
         y_top = c['Y'][mask_top]
         
-        mask_bottom = [z < alpha*(Y_min-c['Y0']) for z in c['Y']-c['Y0']]
+        i_Y_min = np.argmin(c['Y'])
+        theta_ymin = c['theta_XY'][i_Y_min]
+
+        mask_bottom = (c['theta_XY']>=0.985*theta_ymin) & (c['theta_XY']<=1.015*theta_ymin)
         # try to patch masks in case the filter criteria result in < 7 points (minimum of required for 5th order fit + 1)
         if np.array(mask_bottom).sum() < 7:
-            i_Y_min = np.argmin(c['Y'])
             for i in range(i_Y_min-3,i_Y_min+4):
                 if i > 0 and i < len(c['Y']) and c['theta_XY'][i] > np.pi and c['theta_XY'][i] < 2*np.pi:
                     mask_bottom[i] = True
@@ -862,18 +863,15 @@ def contour_extrema(c,plot_debug=True):
         if plot_debug:
             plt.plot(c['X'],c['Y'])
 
-        def fit_slice_and_interp_y_extremum(x, y, theta, n_multi=10):
+        def fit_slice_and_interp_y_extremum(x, y, theta, n_multi=4):
             theta_fine = np.linspace(theta[0],theta[-1],n_multi*len(theta))
             try:
                 #try spline fit
                 try:
-                    y_fit = interpolate.UnivariateSpline(theta,y,k=5)(theta_fine)
+                    y_fit = interpolate.UnivariateSpline(theta,y,k=3)(theta_fine)
                 # try polyfit
                 except:
-                    if len(y) < 7:
                         y_fit = np.poly1d(np.polyfit(theta,y,3))(theta_fine)
-                    else:
-                        y_fit = np.poly1d(np.polyfit(theta,y,5))(theta_fine)
                 y_fit_grad = np.gradient(y_fit,theta_fine,edge_order=2)
 
                 x_interp = np.interp(theta_fine,theta,x)
