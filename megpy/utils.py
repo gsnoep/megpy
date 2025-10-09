@@ -47,91 +47,97 @@ def find(val, arr,n=1):
     else:
         return list(np.argsort(np.abs(arr_-val)))[:n]
 
-def arctan2pi(y,x):
-    """Compute the element-wise arctan(y/x) choosing the quadrant correctly and reformating the result to be bound between 0 and 2 * pi
+def arctan2pi(y, x):
+    """Compute the element-wise arctan(y/x) choosing the quadrant correctly and reformatting the result to be bounded between 0 and 2 * pi.
 
     Args:
-        y (array): y-coordinates, MUST be real-valued!
-        x (array): x-coordinates, MUST be real-values!
+        y (array): y-coordinates, must be real-valued.
+        x (array): x-coordinates, must be real-valued.
 
     Raises:
-        ValueError: if y-coordinates are not all real-valued
-        ValueError: if x-coordinates are not all real-valued
+        ValueError: If y or x coordinates are not real-valued or have incompatible shapes.
 
     Returns:
-        thetha (array): element-wise arctan(y/x) bounded between 0 and 2 * pi
+        theta (array): Element-wise arctan(y/x) bounded between 0 and 2 * pi.
     """
-    if np.all(np.isreal(y)) and np.all(np.isreal(x)):
-        # calculate the angle
-        theta = np.arctan2(y,x)
-        # fix the arctan asymptote jump
-        for ind in np.flatnonzero(np.abs(np.diff(theta)) > np.pi):
-            theta[ind+1:] += -1*np.sign(np.diff(theta)[ind])*2*np.pi
-        # make sure the resulting angle array is between 0 and 2 pi
-        theta[theta<0.] += 2*np.pi
-        theta[theta>2*np.pi] -= 2*np.pi
-
-        return theta
-    else:
-        if not np.all(np.isreal(y)):
-            raise ValueError('y-coordinates are not all real, check your inputs!')
-        if not np.all(np.isreal(x)):
-            raise ValueError('x-coordinates are not all real, check your inputs!')
-
-def arcsin2pi(x,bounds_error=False):
-    """Compute the element-wise arcsin(x) reformating the result to be bound between 0 and 2 * pi
-
-    Args:
-        x (array): x-coordinates, MUST be real-values between -1 and 1!
-
-    Raises:
-        ValueError: if x-coordinates are not -1 <= x <= 1
-
-    Returns:
-        thetha (array): element-wise arcsin(x) bounded between 0 and 2 * pi
-    """
-    if (np.any(x<-1) or np.any(x>1)):
-        if bounds_error:
-            raise ValueError('arcsin2pi: x does not fit the input bounds requirement: -1 <= x <= 1 !')
-        else:
-            x[x>1] = 1.
-            x[x<-1] = -1.
-
-    # calculate the angle
-    theta = np.arcsin(x)
-
-    # fix the asymptote jumps
-    theta[find(1,x):find(-1,x)] = (-np.arcsin(x)+np.pi)[find(1,x):find(-1,x)]
-    theta[find(-1,x):] = (np.arcsin(x)+2*np.pi)[find(-1,x):]
-
+    if not (np.all(np.isreal(y)) and np.all(np.isreal(x))):
+        raise ValueError('Both y and x coordinates must be real-valued!')
+    if y.shape != x.shape:
+        raise ValueError('y and x must have the same shape!')
+    
+    theta = np.arctan2(y, x)
+    theta = np.mod(theta, 2 * np.pi)
     return theta
 
-def arccos2pi(x,bounds_error=False):
-    """Compute the element-wise arccos(x) reformating the result to be bound between 0 and 2 * pi
+def arcsin2pi(x, bounds_error=False):
+    """Compute the element-wise arcsin(x) reformatted to be bounded between 0 and 2 * pi, while ensuring the result is continuous and increasing for sequential inputs over one period.
 
     Args:
-        x (array): x-coordinates, MUST be real-values between -1 and 1!
+        x (array): Input values, must be real-valued and in [-1, 1]. Assumed to be a 1D sequence covering at least one full sine-like period (reaching ~1 and then ~-1).
+        bounds_error (bool): If True, raise ValueError for x not in [-1, 1]. If False, clamp values.
 
     Raises:
-        ValueError: if x-coordinates are not -1 <= x <= 1
+        ValueError: If x is not 1D, contains non-real values, does not reach values close to 1 or -1, or values outside [-1, 1] when bounds_error=True.
 
     Returns:
-        thetha (array): element-wise arcsin(x) bounded between 0 and 2 * pi
+        theta (array): Element-wise arcsin(x) adjusted to be continuous, increasing, and bounded between 0 and 2 * pi for single-period inputs.
     """
-    if (np.any(x<-1) or np.any(x>1)):
+    x = np.asarray(x)
+    if x.ndim != 1:
+        raise ValueError('Input x must be a 1D array for continuity adjustments!')
+    if not np.all(np.isreal(x)):
+        raise ValueError('Input x must be real-valued!')
+    
+    if np.any(x < -1) or np.any(x > 1):
         if bounds_error:
-            raise ValueError('arcsin2pi: x does not fit the input bounds requirement: -1 <= x <= 1 !')
+            raise ValueError('x does not fit the input bounds requirement: -1 <= x <= 1!')
         else:
-            x[x>1] = 1.
-            x[x<-1] = -1.
+            x = np.clip(x, -1, 1)
+    
+    idx1 = np.argmax(x)
+    if not np.isclose(x[idx1], 1, atol=1e-2):
+        raise ValueError('Input x does not reach a value close to 1 (required for branch adjustment)!')
+    
+    idxm1_slice = np.argmin(x[idx1:]) + idx1
+    if not np.isclose(x[idxm1_slice], -1, atol=1e-2):
+        raise ValueError('Input x does not reach a value close to -1 after the peak (required for branch adjustment)!')
+    
+    theta = np.arcsin(x)
+    theta[idx1:idxm1_slice] = np.pi - np.arcsin(x[idx1:idxm1_slice])
+    theta[idxm1_slice:] = np.arcsin(x[idxm1_slice:]) + 2 * np.pi
+    return theta
 
-    # calculate the angle
+def arccos2pi(x, bounds_error=False):
+    """Compute the element-wise arccos(x) reformatted to be bounded between 0 and 2 * pi, while ensuring the result is continuous and increasing for sequential inputs over one period.
+
+    Args:
+        x (array): Input values, must be real-valued and in [-1, 1]. Assumed to be a 1D sequence covering at least one full cosine-like period (reaching ~-1).
+        bounds_error (bool): If True, raise ValueError for x not in [-1, 1]. If False, clamp values.
+
+    Raises:
+        ValueError: If x is not 1D, contains non-real values, does not reach a value close to -1, or values outside [-1, 1] when bounds_error=True.
+
+    Returns:
+        theta (array): Element-wise arccos(x) adjusted to be continuous, increasing, and bounded between 0 and 2 * pi for single-period inputs.
+    """
+    x = np.asarray(x)
+    if x.ndim != 1:
+        raise ValueError('Input x must be a 1D array for continuity adjustments!')
+    if not np.all(np.isreal(x)):
+        raise ValueError('Input x must be real-valued!')
+    
+    if np.any(x < -1) or np.any(x > 1):
+        if bounds_error:
+            raise ValueError('x does not fit the input bounds requirement: -1 <= x <= 1!')
+        else:
+            x = np.clip(x, -1, 1)
+    
+    idxm1 = np.argmin(x)
+    if not np.isclose(x[idxm1], -1, atol=1e-2):
+        raise ValueError('Input x does not reach a value close to -1 (required for branch adjustment)!')
+    
     theta = np.arccos(x)
-
-    # fix the asymptote jumps
-    theta[:find(1,x)] = (-np.arccos(x)+2*np.pi)[:find(1,x)]
-    theta[find(-1,x):] = (-np.arccos(x)+2*np.pi)[find(-1,x):]
-
+    theta[idxm1:] = 2 * np.pi - np.arccos(x[idxm1:])
     return theta
 
 def read_file(path='./',file=None,mode='r'):
