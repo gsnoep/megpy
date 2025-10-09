@@ -133,14 +133,12 @@ class Equilibrium():
 
                         # handle the exception of len(eqdsk_format[key]['vars']) > 1 and the data being stored in value pairs 
                         if len(self._eqdsk_format[key]['vars']) > 1 and len(self._eqdsk_format[key]['vars']) != self._eqdsk_format[key]['size'][0]:
-                            # make a shadow copy of values
-                            _values = copy.deepcopy(values)
-                            # empty the values list
+                            num_vars = len(self._eqdsk_format[key]['vars'])
+                            _values = np.array(values)
                             values = []
-                            # collect all the values belonging to the n-th variable in the format list and remove them from the shadow value list until empty
-                            for j in range(len(self._eqdsk_format[key]['vars']),0,-1):
-                                values.append(np.array(_values[0::j]))
-                                _values = [value for value in _values if value not in values[-1]]
+                            # deinterleave using positional slicing (e.g., for pairs: [0::2] for first var, [1::2] for second)
+                            for i in range(num_vars):
+                                values.append(_values[i::num_vars])
                         # store and reshape the values in a np.array() in case eqdsk_format[key]['size'] > max_values
                         elif self._eqdsk_format[key]['size'][0] > self._max_values:
                             values = [np.array(values).reshape(self._eqdsk_format[key]['size'])]
@@ -158,7 +156,7 @@ class Equilibrium():
                     else:
                         if line.strip():
                             comment_lines.append(str(line))
-                self.raw['comment'] = '\n'.join(comment_lines)
+                self.raw['info'] = '\n'.join(comment_lines)
 
             if check_consistency:
                 # sanity check the eqdsk values
