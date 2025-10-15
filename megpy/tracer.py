@@ -738,8 +738,16 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         contours.update({'x_points':x_points})
     
     contours = contour_center(contours)
+    contours = contour_centroid(contours)
 
     return contours
+
+def contour_centroid(c):
+    # find the average elevation (midplane) of the contour by computing the vertical centroid [Candy PPCF 51 (2009) 105009]
+    c['Yc'] = integrate.trapezoid(c['X']*c['Y'],c['Y'])/integrate.trapezoid(c['X'],c['Y'])
+    c['Xc'] = integrate.trapezoid(c['X']*c['Y'],c['X'])/integrate.trapezoid(c['Y'],c['X'])
+
+    return c
 
 def contour_center(c):
     """
@@ -753,21 +761,20 @@ def contour_center(c):
     Returns:
         (dict): the contour with the extrema information added
     """
-
-    # find the average elevation (midplane) of the contour by computing the vertical centroid [Candy PPCF 51 (2009) 105009]
-    c['Y0'] = integrate.trapezoid(c['X']*c['Y'],c['Y'])/integrate.trapezoid(c['X'],c['Y'])
-    #c['X0'] = integrate.trapezoid(c['X']*c['Y'],c['X'])/integrate.trapezoid(c['Y'],c['X'])
-
     # find the extrema of the contour in the radial direction at the average elevation
-    c = contour_extrema(c)
+    if 'X_in' not in c or 'X_out' not in c or 'Y_min' not in c or 'Y_max' not in c or 'X_min' not in c or 'X_max' not in c:
+        c = contour_minmax(c)
 
     # compute the minor and major radii of the contour at the average elevation
     c['r'] = (c['X_out']-c['X_in'])/2
     c['X0'] = (c['X_out']+c['X_in'])/2
 
+    # compute the average elevation (midplane) of the contour bounding box
+    c['Y0'] = (c['Y_max'] + c['Y_min'])/2
+
     return c
 
-def contour_extrema(c,plot_debug=False):
+def contour_minmax(c,plot_debug=False):
     """Find the (true) extrema in X and Y of a contour trace c given by c['X'], c['Y'].
 
     Args:
@@ -780,60 +787,46 @@ def contour_extrema(c,plot_debug=False):
         (dict): the contour with the extrema information added
     """
     with np.errstate(divide='ignore',invalid='ignore'):
-        # find the approximate(!) extrema in Y of the contour
-        Y_max = np.max(c['Y'])
-        Y_min = np.min(c['Y'])
+        if plot_debug:
+            plt.plot(c['X'],c['Y'],lw=0.8,color='black')
 
-        # check if the midplane of the contour is provided
-        if 'Y0' not in c:
-            c['Y0'] = Y_min+((Y_max-Y_min)/2)
+        def fit_slice_and_interp_y_extremum(x, y, theta, n_multi=20):
+            theta_fine = np.linspace(theta[0],theta[-1],n_multi*len(theta))
+            try:
+                #try spline fit
+                try:
+                    y_fit = interpolate.UnivariateSpline(theta,y,k=3)(theta_fine)
+                # try polyfit
+                except:
+                        y_fit = np.poly1d(np.polyfit(theta,y,3))(theta_fine)
+                y_fit_grad = np.gradient(y_fit,theta_fine,edge_order=2)
+
+                x_interp = interpolate.interp1d(theta,x)(theta_fine)
+
+                theta_extremum = interpolate.interp1d(y_fit_grad,theta_fine)(0.)
+                y_extremum = interpolate.interp1d(theta_fine,y_fit)(theta_extremum)
+                x_y_extremum = interpolate.interp1d(theta_fine,x_interp)(theta_extremum)
+            # fall back to argmax
+            except:
+                i_y_extremum = np.argmax(np.abs(y))
+                y_extremum = y[i_y_extremum]
+                x_y_extremum = x[i_y_extremum]
+            
+            # plot to check
+            if plot_debug:
+                plt.plot(x,y,'r.')
+                plt.plot(x_interp,y_fit,'g-')
+                plt.plot(x_y_extremum,y_extremum,'o',markerfacecolor='none')
+                plt.plot(x[np.argmax(np.abs(y))],y[np.argmax(np.abs(y))],'x',markerfacecolor='none')
+
+
+            return x_y_extremum,y_extremum
         
+        # check for or compute theta_XY
         if 'theta_XY' not in c:
             c['theta_XY'] = np.mod(np.arctan2(c['Y']-np.mean(c['Y']), c['X']-np.mean(c['X'])),2*np.pi)
 
-        # compute X_in
-        mask_in = (c['theta_XY']>=0.5*np.pi) & (c['theta_XY']<=1.5*np.pi)
-        
-        # try to patch masks in case the filter criteria result in < 7 points
-        i_X_min = np.argmin(c['X'])
-        if np.array(mask_in).sum() < 7:
-            for i in range(i_X_min-3,i_X_min+4):
-                if i < len(c['X']) and c['X'][i] >= (np.min(c['X'])+np.max(c['X']))/2:
-                    mask_in[i] = True
-        
-        X_in = c['X'][mask_in]
-        Y_in = c['Y'][mask_in]
-
-        c['X_in'] = np.interp(c['Y0'], Y_in[::-1], X_in[::-1])
-        theta_in = c['theta_XY'][mask_in]
-        x_in_dtheta = np.gradient(X_in,theta_in)
-
-        theta_xmin = np.interp(0,x_in_dtheta,theta_in)
-        X_min = np.interp(theta_xmin,theta_in,X_in)
-        Y_Xmin = np.interp(theta_xmin,theta_in,Y_in)
-
-        # compute X_out
-        i_out_lower = np.where(c['theta_XY']>=1.5*np.pi)
-        i_out_upper = np.where(c['theta_XY']<=0.5*np.pi)
-        mask_out = np.hstack((i_out_lower,i_out_upper))[0]
-        
-        i_X_max = np.argmax(c['X'])
-        if np.array(mask_out).sum() < 7:
-            for i in range(i_X_max-3,i_X_max+4):
-                if i < len(c['X']) and c['X'][i] <= (np.min(c['X'])+np.max(c['X']))/2:
-                    mask_out[i] = True
-
-        X_out = c['X'][mask_out]
-        Y_out = c['Y'][mask_out]
-
-        c['X_out'] = np.interp(c['Y0'], Y_out, X_out)
-        theta_out = np.hstack((c['theta_XY'][i_out_lower],c['theta_XY'][i_out_upper]+2*np.pi))
-        x_out_dtheta = np.gradient(X_out,theta_out)
-
-        theta_xmax = np.interp(0,x_out_dtheta,theta_out)
-        X_max = np.interp(theta_xmax,theta_out,X_out)
-        Y_Xmax = np.interp(theta_xmax,theta_out,Y_out)
-
+        # compute X_Ymax, Y_max and X_Ymin, Y_min
         i_Y_max = np.argmax(c['Y'])
         theta_ymax = c['theta_XY'][i_Y_max]
         
@@ -862,39 +855,6 @@ def contour_extrema(c,plot_debug=False):
         x_bottom = c['X'][mask_bottom]
         y_bottom = c['Y'][mask_bottom]
 
-        if plot_debug:
-            plt.plot(c['X'],c['Y'])
-
-        def fit_slice_and_interp_y_extremum(x, y, theta, n_multi=4):
-            theta_fine = np.linspace(theta[0],theta[-1],n_multi*len(theta))
-            try:
-                #try spline fit
-                try:
-                    y_fit = interpolate.UnivariateSpline(theta,y,k=3)(theta_fine)
-                # try polyfit
-                except:
-                        y_fit = np.poly1d(np.polyfit(theta,y,3))(theta_fine)
-                y_fit_grad = np.gradient(y_fit,theta_fine,edge_order=2)
-
-                x_interp = np.interp(theta_fine,theta,x)
-
-                theta_extremum = interpolate.interp1d(y_fit_grad,theta_fine)(0.)
-                y_extremum = np.interp(theta_extremum,theta_fine,y_fit)
-                x_y_extremum = np.interp(theta_extremum,theta_fine,x_interp)
-            # fall back to argmax
-            except:
-                i_y_extremum = np.argmax(np.abs(y))
-                y_extremum = y[i_y_extremum]
-                x_y_extremum = x[i_y_extremum]
-            
-            # plot to check
-            if plot_debug:
-                plt.plot(x,y,'r.')
-                plt.plot(x_interp,y_fit,'g-')
-                plt.plot(x_y_extremum,y_extremum,'o',markerfacecolor='none')
-
-            return x_y_extremum,y_extremum
-
         if 'x_points' not in c:
             # fit the max and min slices of the contour, compute the gradient of these fits and interpolate to zero to find X_Ymax, Y_max, X_Ymin and Y_min
             X_Ymax, Y_max = fit_slice_and_interp_y_extremum(x_top,y_top,theta_top)
@@ -912,6 +872,52 @@ def contour_extrema(c,plot_debug=False):
                 X_Ymin = c['X'][np.where(c['Y']==Y_min)][0]
             else:
                 X_Ymin, Y_min = fit_slice_and_interp_y_extremum(x_bottom,y_bottom,theta_bottom)
+
+        # compute Y0
+        c['Y0'] = (Y_max + Y_min) / 2
+
+        # compute X_in
+        mask_in = (c['theta_XY'] >= 0.5*np.pi) & (c['theta_XY'] <= 1.5*np.pi)
+        
+        # try to patch masks in case the filter criteria result in < 7 points
+        i_X_min = np.argmin(c['X'])
+        if np.array(mask_in).sum() < 7:
+            for i in range(i_X_min-3,i_X_min+4):
+                if i < len(c['X']) and c['X'][i] >= (np.min(c['X'])+np.max(c['X']))/2:
+                    mask_in[i] = True
+        
+        X_in = c['X'][mask_in]
+        Y_in = c['Y'][mask_in]
+
+        c['X_in'] = np.interp(c['Y0'], Y_in[::-1], X_in[::-1])
+        theta_in = c['theta_XY'][mask_in]
+        x_in_dtheta = np.gradient(X_in,theta_in)
+
+        theta_xmin = interpolate.interp1d(x_in_dtheta,theta_in)(0.)
+        X_min = interpolate.interp1d(theta_in,X_in)(theta_xmin)
+        Y_Xmin = interpolate.interp1d(theta_in,Y_in)(theta_xmin)
+
+        # compute X_out
+        i_out_lower = np.where(c['theta_XY']>=1.5*np.pi)
+        i_out_upper = np.where(c['theta_XY']<=0.5*np.pi)
+        mask_out = np.hstack((i_out_lower,i_out_upper))[0]
+        
+        i_X_max = np.argmax(c['X'])
+        if np.array(mask_out).sum() < 7:
+            for i in range(i_X_max-3,i_X_max+4):
+                if i < len(c['X']) and c['X'][i] <= (np.min(c['X'])+np.max(c['X']))/2:
+                    mask_out[i] = True
+
+        X_out = c['X'][mask_out]
+        Y_out = c['Y'][mask_out]
+
+        c['X_out'] = np.interp(c['Y0'], Y_out, X_out)
+        theta_out = np.hstack((c['theta_XY'][i_out_lower],c['theta_XY'][i_out_upper]+2*np.pi))
+        x_out_dtheta = np.gradient(X_out,theta_out)
+
+        theta_xmax = interpolate.interp1d(x_out_dtheta,theta_out)(0.)
+        X_max = interpolate.interp1d(theta_out,X_out)(theta_xmax)
+        Y_Xmax = interpolate.interp1d(theta_out,Y_out)(theta_xmax)
 
         c.update({'X_Ymax':float(X_Ymax),'Y_max':float(Y_max),
                 'X_Ymin':float(X_Ymin),'Y_min':float(Y_min),
