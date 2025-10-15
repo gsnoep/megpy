@@ -16,6 +16,7 @@ import os
 import re
 import copy
 import numpy as np
+import xarray as xr
 import time
 import json
 import codecs
@@ -469,6 +470,32 @@ class Equilibrium():
         out.read_ids_equilibrium(f_path=f_path,add_derived=add_derived)
         return out
 
+    def to_xarray(self):
+        self.profiles = xr.Dataset(
+            {
+                "psi": (["rho_tor"], self.derived['psi']),
+                "phi": (["rho_tor"], self.derived['phi']),
+                "r/a": (["rho_tor"], self.derived['r/a']),
+                "r": (["rho_tor"], self.derived['r']),
+
+                "fpol": (["rho_tor"], self.derived['fpol']),
+                "pres": (["rho_tor"], self.derived['pres']),
+                "ffprim": (["rho_tor"], self.derived['ffprim']),
+                "pprime": (["rho_tor"], self.derived['pprime']),
+                "q": (["rho_tor"], self.derived['qpsi']),
+                "s": (["rho_tor"], self.derived['s']),
+                "R0": (["rho_tor"], self.derived['Ro']),
+                "Z0": (["rho_tor"], self.derived['Zo']),
+                "dR0dr": (["rho_tor"], self.derived['dRodr']),
+                "dZ0dr": (["rho_tor"], self.derived['dZodr']),
+            },
+            coords={
+                "rho_tor": self.derived['rho_tor'],
+            }
+        )
+
+        return
+
     ## physics functions
     def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,verbose=False):
         """Add quantities derived from the raw `Equilibrium.read_geqdsk()` output, such as phi, rho_pol, rho_tor to the `Equilibrium` object.
@@ -653,7 +680,10 @@ class Equilibrium():
                 else:
                     x_list = list(x)
                 
-                mag_axis = tracer.find_o_points(derived['R'], derived['Z'], derived['psirz'],derived['psi'][0])[0]
+                try:
+                    mag_axis = tracer.find_o_points(derived['R'], derived['Z'], derived['psirz'],derived['psi'][0])[0]
+                except:
+                    mag_axis = np.array([derived['rmaxis'],derived['zmaxis']])
 
                 tracer_timing = 0.
                 analytic_timing = 0.
@@ -825,9 +855,9 @@ class Equilibrium():
                             fluxsurfaces[key].insert(0,np.array([derived['rmaxis']]))
                         elif key in ['Z']:
                             fluxsurfaces[key].insert(0,np.array([derived['zmaxis']]))
-                        elif key in ['R0','R_Zmax','R_Zmin','R_in','R_out']:
+                        elif key in ['R0','R_Zmax','R_Zmin','R_in','R_out','Ro']:
                             fluxsurfaces[key].insert(0,derived['rmaxis'])
-                        elif key in ['Z0','Z_max','Z_min']:
+                        elif key in ['Z0','Z_max','Z_min','Zo']:
                             fluxsurfaces[key].insert(0,derived['zmaxis'])
                         elif key in ['q','kappa','delta','zeta','s_kappa','s_delta','s_zeta']:
                             fluxsurfaces[key].insert(0,fluxsurfaces[key][0])
@@ -860,8 +890,12 @@ class Equilibrium():
                 derived['dRodr'] = np.gradient(derived['Ro'],derived['r'])
                 derived['dZodr'] = np.gradient(derived['Zo'],derived['r'])
 
+                # add flux surface centroid coordinates
+                derived['R_centroid'] = np.array(fluxsurfaces['Rc'])
+                derived['Z_centroid'] = np.array(fluxsurfaces['Zc'])
+
                 # add the magnetic shear to derived
-                derived['s'] = derived['r']*np.gradient(np.log(fluxsurfaces['q']),derived['r'],edge_order=2)
+                derived['s'] = derived['r']*np.gradient(np.log(np.abs(fluxsurfaces['q'])),derived['r'],edge_order=2)
 
                 # add several magnetic field quantities to derived
                 derived['Bref_eqdsk'] = derived['fpol'][0]/derived['rmaxis']
