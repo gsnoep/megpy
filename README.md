@@ -23,7 +23,7 @@ Or use the Python API, of which some examples can be found in /examples/.
 To contribute, open a pull request or raise an issue!
 
 # Supported equilibrium formats
-- EQDSK [(g-file)](https://w3.pppl.gov/ntcc/TORAY/G_EQDSK.pdf) from EFIT, ESCO, CHEASE or LIUQE
+- EQDSK [(g-file)](https://w3.pppl.gov/ntcc/TORAY/G_EQDSK.pdf) from EFIT, ESCO, FreeGS, CHEASE or LIUQE
 - [EX2GK](https://gitlab.com/aaronkho/EX2GK) pickle file
 - IMAS equilibrium IDS
 
