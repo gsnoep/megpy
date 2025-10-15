@@ -16,6 +16,7 @@ import os
 import re
 import copy
 import numpy as np
+import xarray as xr
 import time
 import json
 import codecs
@@ -60,7 +61,7 @@ class Equilibrium():
         self.verbose = verbose
 
     ## I/O functions
-    def read_geqdsk(self,f_path=None,add_derived=False):
+    def read_geqdsk(self,f_path=None,check_consistency=False,add_derived=False):
         """Read an eqdsk g-file from file into `Equilibrium` object
 
         Args:
@@ -108,6 +109,9 @@ class Equilibrium():
                             try:
                                 # split the row string into separate values by ' ' as delimiter, adding a space before a minus sign if it is the delimiter
                                 values = list(filter(None,re.sub(r'(?<![Ee])-',' -',row).rstrip('\n').split(' ')))
+                                if current_row == 0:
+                                    for i in range(self._eqdsk_format[0]['size'][0]-len(values)):
+                                        values = ['UNKONWN'] + values
                                 # select all the numerical values in the list of sub-strings of the current row, but keep them as strings so the fortran formatting remains
                                 numbers = [j for i in [num for num in (re.findall(r'^(?![A-Z]).*-?\ *[0-9]+\.?[0-9]*(?:[Ee]\ *[-+]?\ *[0-9]+)?', value) for value in values)] for j in i]
                                 # select all the remaining sub-strings and store them in a separate list
@@ -130,14 +134,12 @@ class Equilibrium():
 
                         # handle the exception of len(eqdsk_format[key]['vars']) > 1 and the data being stored in value pairs 
                         if len(self._eqdsk_format[key]['vars']) > 1 and len(self._eqdsk_format[key]['vars']) != self._eqdsk_format[key]['size'][0]:
-                            # make a shadow copy of values
-                            _values = copy.deepcopy(values)
-                            # empty the values list
+                            num_vars = len(self._eqdsk_format[key]['vars'])
+                            _values = np.array(values)
                             values = []
-                            # collect all the values belonging to the n-th variable in the format list and remove them from the shadow value list until empty
-                            for j in range(len(self._eqdsk_format[key]['vars']),0,-1):
-                                values.append(np.array(_values[0::j]))
-                                _values = [value for value in _values if value not in values[-1]]
+                            # deinterleave using positional slicing (e.g., for pairs: [0::2] for first var, [1::2] for second)
+                            for i in range(num_vars):
+                                values.append(_values[i::num_vars])
                         # store and reshape the values in a np.array() in case eqdsk_format[key]['size'] > max_values
                         elif self._eqdsk_format[key]['size'][0] > self._max_values:
                             values = [np.array(values).reshape(self._eqdsk_format[key]['size'])]
@@ -155,15 +157,16 @@ class Equilibrium():
                     else:
                         if line.strip():
                             comment_lines.append(str(line))
-                self.raw['comment'] = '\n'.join(comment_lines)
+                self.raw['info'] = '\n'.join(comment_lines)
 
-            # sanity check the eqdsk values
-            for key in self._sanity_values:
-                # find the matching sanity key in eqdsk
-                sanity_pair = [keypair for keypair in self.raw.keys() if keypair.startswith(key)][1]
-                #print(sanity_pair)
-                if self.raw[key]!=self.raw[sanity_pair]:
-                    raise ValueError('Inconsistent '+key+': %7.4g, %7.4g'%(self.raw[key], self.raw[sanity_pair])+'. CHECK YOUR EQDSK FILE!')
+            if check_consistency:
+                # sanity check the eqdsk values
+                for key in self._sanity_values:
+                    # find the matching sanity key in eqdsk
+                    sanity_pair = [keypair for keypair in self.raw.keys() if keypair.startswith(key)][1]
+                    #print(sanity_pair)
+                    if self.raw[key]!=self.raw[sanity_pair]:
+                        raise ValueError('Inconsistent '+key+': %7.4g, %7.4g'%(self.raw[key], self.raw[sanity_pair])+'. CHECK YOUR EQDSK FILE!')
 
             if add_derived:
                 self.add_derived()
@@ -467,8 +470,34 @@ class Equilibrium():
         out.read_ids_equilibrium(f_path=f_path,add_derived=add_derived)
         return out
 
+    def to_xarray(self):
+        self.profiles = xr.Dataset(
+            {
+                "psi": (["rho_tor"], self.derived['psi']),
+                "phi": (["rho_tor"], self.derived['phi']),
+                "r/a": (["rho_tor"], self.derived['r/a']),
+                "r": (["rho_tor"], self.derived['r']),
+
+                "fpol": (["rho_tor"], self.derived['fpol']),
+                "pres": (["rho_tor"], self.derived['pres']),
+                "ffprim": (["rho_tor"], self.derived['ffprim']),
+                "pprime": (["rho_tor"], self.derived['pprime']),
+                "q": (["rho_tor"], self.derived['qpsi']),
+                "s": (["rho_tor"], self.derived['s']),
+                "R0": (["rho_tor"], self.derived['Ro']),
+                "Z0": (["rho_tor"], self.derived['Zo']),
+                "dR0dr": (["rho_tor"], self.derived['dRodr']),
+                "dZ0dr": (["rho_tor"], self.derived['dZodr']),
+            },
+            coords={
+                "rho_tor": self.derived['rho_tor'],
+            }
+        )
+
+        return
+
     ## physics functions
-    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,tracer_diag=None,verbose=False):
+    def add_derived(self,f_path=None,refine=None,just_derived=False,incl_fluxsurfaces=False,analytic_shape=False,incl_B=False,verbose=False):
         """Add quantities derived from the raw `Equilibrium.read_geqdsk()` output, such as phi, rho_pol, rho_tor to the `Equilibrium` object.
         Can also be called directly if `f_path` is defined.
 
@@ -549,11 +578,18 @@ class Equilibrium():
             derived['R_x'] = derived['rbbbs'][i_xpoint_Z]
             derived['Z_x'] = derived['zbbbs'][i_xpoint_Z]
 
-            bbbs_center = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
+            lcfs = tracer.contour(derived['R'],derived['Z'],derived['psirz'],derived['sibry'],kind='l',x_point=True)
+
+            bbbs_center = tracer.contour_center({'X':lcfs['X'],'Y':lcfs['Y'],'level':derived['sibry'],'label':1.0})
 
             derived['R0'] = bbbs_center['X0']
             derived['Z0'] = bbbs_center['Y0']
             derived['a'] = bbbs_center['r']
+        
+        if 'rlim' not in derived:
+            derived['rlim'] = np.array([])
+        if 'zlim' not in derived:
+            derived['zlim'] = np.array([])
 
         # compute LFS phi (toroidal flux in W/rad) grid from integrating q = d psi/d phi
         derived['phi'] = integrate.cumulative_trapezoid(derived['qpsi'],derived['psi'],initial=0)
@@ -588,14 +624,14 @@ class Equilibrium():
         derived['B_tor_rz'] = interpolate.interp1d(derived['psi'],derived['fpol'],bounds_error=False,fill_value='extrapolate')(derived['psirz'])/R
 
         if incl_fluxsurfaces:
-            self.add_fluxsurfaces(refine=refine,analytic_shape=analytic_shape,incl_B=incl_B,tracer_diag=tracer_diag)
+            self.add_fluxsurfaces(refine=refine,analytic_shape=analytic_shape,incl_B=incl_B)
               
         if just_derived:
             return self.derived 
         else:
             return self
 
-    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,analytic_shape=False,incl_B=False,tracer_diag=None,verbose=False):
+    def add_fluxsurfaces(self,x=None,x_label='rho_tor',refine=None,analytic_shape=False,incl_B=False,force_boundary=True,verbose=False):
         """Add flux surfaces to an `Equilibrium`.
         
         Args:
@@ -623,32 +659,17 @@ class Equilibrium():
                     self.add_derived()
                 fluxsurfaces = self.fluxsurfaces
 
-                if refine and derived['nw'] != refine*derived['nw']:
-                    self.refine(nw=refine*derived['nw'],nh=refine*derived['nh'],self_consistent=False)
+                if refine and derived['nw'] != refine*raw['nw']:
+                    self.refine(nw=refine*raw['nw'],nh=refine*raw['nh'],self_consistent=False)
                     self.add_derived()
                 
                 R = copy.deepcopy(derived['R'])
                 Z = copy.deepcopy(derived['Z'])
                 psirz = copy.deepcopy(derived['psirz'])
 
-                if tracer_diag == 'mesh':
-                    fig = plt.figure()
-                    ax = fig.add_subplot(projection='3d')
-                    R_,Z_ = np.meshgrid(R,Z)
-                    ax.plot_wireframe(R_,Z_,psirz, rstride=10, cstride=10)
-                    ax.set_xlabel('R [m]')
-                    ax.set_ylabel('Z [m]')
-                    ax.set_zlabel('$\\Psi$')
-                    plt.show()
-
                 # find the approximate location of the magnetic axis on the psirz map
                 i_rmaxis = find(self.derived['rmaxis'],R)
                 i_zmaxis = find(self.derived['zmaxis'],Z)
-
-                if tracer_diag:
-                    plt.figure()
-                    if tracer_diag == 'fs':
-                        plt.plot(derived['rmaxis'],derived['zmaxis'],'bx')
 
                 # add the flux surface data for rho_tor > 0
                 if not x:
@@ -659,14 +680,10 @@ class Equilibrium():
                 else:
                     x_list = list(x)
                 
-                threshold = derived['sibry']
-                interp_method = 'normal'
-                if np.max(psirz[np.where(psirz!=0.0)]) <= threshold:
-                    threshold = np.max(psirz[np.where(psirz!=0.0)])
-                #    interp_method = 'bounded_extrapolation'
-                elif np.min(psirz[np.where(psirz!=0.0)]) >= threshold:
-                    threshold = np.min(psirz[np.where(psirz!=0.0)])
-                #    interp_method = 'bounded_extrapolation'
+                try:
+                    mag_axis = tracer.find_o_points(derived['R'], derived['Z'], derived['psirz'],derived['psi'][0])[0]
+                except:
+                    mag_axis = np.array([derived['rmaxis'],derived['zmaxis']])
 
                 tracer_timing = 0.
                 analytic_timing = 0.
@@ -676,7 +693,7 @@ class Equilibrium():
                         stdout.write('\r {}% completed'.format(round(100*(find(x_fs,x_list)+1)/len(x_list))))
                         stdout.flush()
                     # check that rho stays inside the lcfs
-                    if x_fs > 0 and x_fs < 0.999:
+                    if x_fs < x_list[-1]:
                         # compute the psi level of the flux surface
                         psi_fs = float(interpolate.interp1d(derived[x_label],derived['psi'])(x_fs))
                         q_fs = float(interpolate.interp1d(derived[x_label],derived['qpsi'])(x_fs))
@@ -684,7 +701,7 @@ class Equilibrium():
 
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
-                        fs = tracer.contour(R,Z,psirz,psi_fs,threshold,i_center=[i_rmaxis,i_zmaxis],tracer_diag=tracer_diag,interp_method=interp_method)
+                        fs = tracer.contour(R,Z,psirz,psi_fs,ref_point=mag_axis) #ref_point=np.array([derived['rmaxis'],derived['zmaxis']]))
                         tracer_timing += time.time()-time0
                         fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
                         if x_label != 'rho_tor' and 'rho_tor' in derived:
@@ -694,8 +711,8 @@ class Equilibrium():
                             if 'X' in key or 'Y' in key:
                                 _key = (key.replace('X','R')).replace('Y','Z')
                                 fs[_key] = fs.pop(key)
-                        del fs['label']
                         del fs['level']
+                        del fs['contours']
                         if not np.isfinite(fs['r']):
                             r_res = np.sqrt((R[i_rmaxis] - derived['rmaxis']) ** 2 + (Z[i_zmaxis] - derived['zmaxis']) ** 2)
                             fs['r'] = r_res * (psi_fs - derived['simag']) / (psirz[i_zmaxis,i_rmaxis] - derived['simag'])
@@ -727,9 +744,9 @@ class Equilibrium():
                                 _incl_B = incl_B
 
                         if _incl_B:
-
                             B_pol_fs = 0.0
                             B_tor_fs = fs['fpol'] / fs['R0']
+                            
                             if len(fs['R']) > 5:
                                 # to speed up the Bpol interpolation generate a reduced Z,R mesh
                                 i_R_in = find(fs['R_in'],self.derived['R'])-2
@@ -741,9 +758,6 @@ class Equilibrium():
 
                                 # interpolate Bpol and Btor
                                 B_pol_fs = interpolate.griddata(RZ_mesh,self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out].flatten(),(fs['Z'],fs['R']),method='cubic')
-                                #B_pol_fs = np.array([])
-                                #for i_R,RR in enumerate(fs['R']):
-                                #    B_pol_fs = np.append(B_pol_fs,interpolate.interp2d(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max],self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out],bounds_error=False,fill_value='extrapolate')(RR,fs['Z'][i_R]))
                                 B_tor_fs = interpolate.interp1d(self.derived['psi'],self.derived['fpol'],bounds_error=False)(np.array([psi_fs]))[0]/fs['R']
                             fs.update({'Bpol':B_pol_fs, 'Btor':B_tor_fs, 'B':np.sqrt(B_pol_fs**2+B_tor_fs**2)})
 
@@ -765,12 +779,9 @@ class Equilibrium():
                     stdout.write('\n')
                     print('tracer time:{:.3f}s / flux-surface'.format(tracer_timing))
                     print('analytic extraction time:{:.3f}s / flux-surface'.format(analytic_timing))
-                
-                if tracer_diag == 'fs':
-                    plt.show()
 
                 if not x:
-                    if 'rbbbs' in raw and 'zbbbs' in raw:
+                    if 'rbbbs' in raw and 'zbbbs' in raw and not force_boundary:
                         # find the geometric center, minor radius and extrema of the lcfs manually
                         lcfs = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
                         keys = copy.deepcopy(list(lcfs.keys()))
@@ -780,7 +791,7 @@ class Equilibrium():
                                 lcfs[_key] = lcfs.pop(key)
                         lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
                     else:
-                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],derived['sibry'],i_center=[i_rmaxis,i_zmaxis],interp_method='bounded_extrapolation',return_self=False)
+                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],ref_point=mag_axis,kind='l',x_point=True)
                         keys = copy.deepcopy(list(lcfs.keys()))
                         for key in keys:
                             if 'X' in key or 'Y' in key:
@@ -798,8 +809,8 @@ class Equilibrium():
                         if 'X' in key or 'Y' in key:
                             _key = (key.replace('X','R')).replace('Y','Z')
                             lcfs[_key] = lcfs.pop(key)
-                    del lcfs['label']
                     del lcfs['level']
+                    del lcfs['contours']
 
                     _incl_B = False
                     if incl_B:
@@ -844,9 +855,9 @@ class Equilibrium():
                             fluxsurfaces[key].insert(0,np.array([derived['rmaxis']]))
                         elif key in ['Z']:
                             fluxsurfaces[key].insert(0,np.array([derived['zmaxis']]))
-                        elif key in ['R0','R_Zmax','R_Zmin','R_in','R_out']:
+                        elif key in ['R0','R_Zmax','R_Zmin','R_in','R_out','Ro']:
                             fluxsurfaces[key].insert(0,derived['rmaxis'])
-                        elif key in ['Z0','Z_max','Z_min']:
+                        elif key in ['Z0','Z_max','Z_min','Zo']:
                             fluxsurfaces[key].insert(0,derived['zmaxis'])
                         elif key in ['q','kappa','delta','zeta','s_kappa','s_delta','s_zeta']:
                             fluxsurfaces[key].insert(0,fluxsurfaces[key][0])
@@ -868,7 +879,7 @@ class Equilibrium():
                 derived['Zo'] = np.array(fluxsurfaces['Z0'])
                 derived['Z0'] = derived['Zo'][-1] # average elevation of the lcfs
                 derived['r'] = np.array(fluxsurfaces['r'])
-                if x and 'rbbbs' and 'zbbbs' in raw:
+                if x and 'rbbbs' and 'zbbbs' in raw and not force_boundary:
                     derived['a'] = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})['r']
                 else:
                     derived['a'] = derived['r'][-1] # midplane average minor radius of the lcfs
@@ -879,8 +890,12 @@ class Equilibrium():
                 derived['dRodr'] = np.gradient(derived['Ro'],derived['r'])
                 derived['dZodr'] = np.gradient(derived['Zo'],derived['r'])
 
+                # add flux surface centroid coordinates
+                derived['R_centroid'] = np.array(fluxsurfaces['Rc'])
+                derived['Z_centroid'] = np.array(fluxsurfaces['Zc'])
+
                 # add the magnetic shear to derived
-                derived['s'] = derived['r']*np.gradient(np.log(fluxsurfaces['q']),derived['r'],edge_order=2)
+                derived['s'] = derived['r']*np.gradient(np.log(np.abs(fluxsurfaces['q'])),derived['r'],edge_order=2)
 
                 # add several magnetic field quantities to derived
                 derived['Bref_eqdsk'] = derived['fpol'][0]/derived['rmaxis']
@@ -981,13 +996,5 @@ class Equilibrium():
         
         self.derived['nw'] = nw
         self.derived['nh'] = nh
-
-        return self
-
-    def plot_derived(self,):
-
-        return self
-    
-    def plot_fluxsurfaces(self,):
 
         return self
