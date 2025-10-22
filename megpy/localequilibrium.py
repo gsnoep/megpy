@@ -19,7 +19,7 @@ class LocalEquilibrium():
         - extract FFT coefficients for a Fourier expansion of the local equilibrium
         - print magnetic geometry input parameters for several microturbulence codes (GENE, TGLF, ...)
     """
-    def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=9,n_theta='default',n_harmonics=1,analytic_shape=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=True):
+    def __init__(self,param,equilibrium,x_loc,x_label='rho_tor',n_x=9,n_theta='default',n_harmonics=1,analytic_shape=False,opt_bpol=False,opt_deriv=False,diag_lsq=0,verbose=False):
         self._params = {'miller':{
                              'param':self.miller,
                              'param_jr':self.miller_jr,
@@ -127,10 +127,10 @@ class LocalEquilibrium():
 
         # generate the poloidal grid
         theta_min = 0
-        theta_max = 2*np.pi
+        theta_max = 2
         if isinstance(n_theta,int):
             self.n_theta = n_theta
-            self.theta = np.linspace(theta_min,theta_max,self.n_theta)
+            self.theta = np.linspace(theta_min,theta_max,self.n_theta)*np.pi
             if self._param == 'miller_general':
                 self.theta = np.linspace(0,2,self.n_theta)*np.pi
         elif not (isinstance(n_theta,int) or isinstance(n_theta,str)):
@@ -199,13 +199,13 @@ class LocalEquilibrium():
                 time0 = time.time()
                 # compute the optimized shape parameters
                 lsq = least_squares(self.cost_param, 
-                                            self.param_initial, 
-                                            bounds=self.param_bounds, 
-                                            ftol=self.tolerance, 
-                                            xtol=self.tolerance, 
-                                            gtol=self.tolerance, 
-                                            loss='soft_l1', 
-                                            verbose=diag_lsq)
+                                    self.param_initial, 
+                                    bounds=self.param_bounds, 
+                                    ftol=self.tolerance, 
+                                    xtol=self.tolerance, 
+                                    gtol=self.tolerance, 
+                                    loss='soft_l1', 
+                                    verbose=diag_lsq)
                 self.params = lsq['x']
                 opt_timing += time.time()-time0
                 #print('Optimization time pp:{}'.format(opt_timing))
