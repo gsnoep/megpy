@@ -35,7 +35,7 @@ class Equilibrium():
     """
     Class to handle any and all data related to the magnetic equilibrium in a magnetic confinement fusion device.
     """
-    def __init__(self,verbose=True):
+    def __init__(self,verbose=False):
         self.raw = {} # storage for all raw eqdsk data
         self.derived = {} # storage for all data derived from eqdsk data
         self.fluxsurfaces = {} # storage for all data related to flux surfaces
@@ -578,13 +578,21 @@ class Equilibrium():
             derived['R_x'] = derived['rbbbs'][i_xpoint_Z]
             derived['Z_x'] = derived['zbbbs'][i_xpoint_Z]
 
-            lcfs = tracer.contour(derived['R'],derived['Z'],derived['psirz'],derived['sibry'],kind='l',x_point=True)
+            try:
+                lcfs = tracer.contour(derived['R'],derived['Z'],derived['psirz'],derived['sibry'],kind='l',x_point=True)
+            except:
+                lcfs = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
+            
+            keys = copy.deepcopy(list(lcfs.keys()))
+            for key in keys:
+                if 'X' in key or 'Y' in key:
+                    _key = (key.replace('X','R')).replace('Y','Z')
+                    lcfs[_key] = lcfs.pop(key)
+            lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
 
-            bbbs_center = tracer.contour_center({'X':lcfs['X'],'Y':lcfs['Y'],'level':derived['sibry'],'label':1.0})
-
-            derived['R0'] = bbbs_center['X0']
-            derived['Z0'] = bbbs_center['Y0']
-            derived['a'] = bbbs_center['r']
+            derived['R0'] = lcfs['R0']
+            derived['Z0'] = lcfs['Z0']
+            derived['a'] = lcfs['r']
         
         if 'rlim' not in derived:
             derived['rlim'] = np.array([])
@@ -692,16 +700,17 @@ class Equilibrium():
                     if self.verbose or verbose:
                         stdout.write('\r {}% completed'.format(round(100*(find(x_fs,x_list)+1)/len(x_list))))
                         stdout.flush()
-                    # check that rho stays inside the lcfs
-                    if x_fs < x_list[-1]:
-                        # compute the psi level of the flux surface
-                        psi_fs = float(interpolate.interp1d(derived[x_label],derived['psi'])(x_fs))
-                        q_fs = float(interpolate.interp1d(derived[x_label],derived['qpsi'])(x_fs))
-                        fpol_fs = float(interpolate.interp1d(derived[x_label],derived['fpol'])(x_fs))
+                    
+                    # compute the psi level of the flux surface
+                    psi_fs = float(interpolate.interp1d(derived[x_label],derived['psi'])(x_fs))
+                    q_fs = float(interpolate.interp1d(derived[x_label],derived['qpsi'])(x_fs))
+                    fpol_fs = float(interpolate.interp1d(derived[x_label],derived['fpol'])(x_fs))
 
+                    # check that rho stays inside the lcfs
+                    if psi_fs != derived['sibry']:
                         # trace the flux surface contour and relabel the tracer output
                         time0 = time.time()
-                        fs = tracer.contour(R,Z,psirz,psi_fs,ref_point=mag_axis) #ref_point=np.array([derived['rmaxis'],derived['zmaxis']]))
+                        fs = tracer.contour(R,Z,psirz,psi_fs,ref_point=mag_axis)
                         tracer_timing += time.time()-time0
                         fs.update({x_label:x_fs, 'psi':psi_fs, 'q':q_fs, 'fpol':fpol_fs})
                         if x_label != 'rho_tor' and 'rho_tor' in derived:
@@ -781,7 +790,25 @@ class Equilibrium():
                     print('analytic extraction time:{:.3f}s / flux-surface'.format(analytic_timing))
 
                 if not x:
-                    if 'rbbbs' in raw and 'zbbbs' in raw and not force_boundary:
+                    if force_boundary:
+                        try:
+                            lcfs = tracer.contour(R,Z,psirz,derived['sibry'],ref_point=mag_axis,kind='l',x_point=True)
+                            keys = copy.deepcopy(list(lcfs.keys()))
+                            for key in keys:
+                                if 'X' in key or 'Y' in key:
+                                    _key = (key.replace('X','R')).replace('Y','Z')
+                                    lcfs[_key] = lcfs.pop(key)
+                            derived.update({'rbbbs':lcfs['R'],'zbbbs':lcfs['Z'],'nbbbs':len(lcfs['R'])})
+                        except:
+                            if 'rbbbs' in raw and 'zbbbs' in raw:
+                                lcfs = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
+                                keys = copy.deepcopy(list(lcfs.keys()))
+                                for key in keys:
+                                    if 'X' in key or 'Y' in key:
+                                        _key = (key.replace('X','R')).replace('Y','Z')
+                                        lcfs[_key] = lcfs.pop(key)
+                                lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
+                    elif 'rbbbs' in raw and 'zbbbs' in raw:
                         # find the geometric center, minor radius and extrema of the lcfs manually
                         lcfs = tracer.contour_center({'X':derived['rbbbs'],'Y':derived['zbbbs'],'level':derived['sibry'],'label':1.0})
                         keys = copy.deepcopy(list(lcfs.keys()))
@@ -791,13 +818,8 @@ class Equilibrium():
                                 lcfs[_key] = lcfs.pop(key)
                         lcfs.update({'theta_RZ':arctan2pi(lcfs['Z']-lcfs['Z0'],lcfs['R']-lcfs['R0'])})
                     else:
-                        lcfs = tracer.contour(R,Z,psirz,derived['sibry'],ref_point=mag_axis,kind='l',x_point=True)
-                        keys = copy.deepcopy(list(lcfs.keys()))
-                        for key in keys:
-                            if 'X' in key or 'Y' in key:
-                                _key = (key.replace('X','R')).replace('Y','Z')
-                                lcfs[_key] = lcfs.pop(key)
-                        derived.update({'rbbbs':lcfs['R'],'zbbbs':lcfs['Z'],'nbbbs':len(lcfs['R'])})
+                        lcfs = {}
+                        
                     if analytic_shape:
                         lcfs.update({'miller_geo':LocalEquilibrium.extract_analytic_shape(lcfs)})
                 
@@ -810,7 +832,8 @@ class Equilibrium():
                             _key = (key.replace('X','R')).replace('Y','Z')
                             lcfs[_key] = lcfs.pop(key)
                     del lcfs['level']
-                    del lcfs['contours']
+                    if 'contours' in lcfs:
+                        del lcfs['contours']
 
                     _incl_B = False
                     if incl_B:
