@@ -733,7 +733,7 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         
         contours = [(x_coordinates, y_coordinates)]
     
-    contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'label':np.sqrt((level-np.min(field))/(np.max(field)-np.min(field))), 'contours':contours}
+    contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'contours':contours}
     if x_point and np.any(x_points):
         contours.update({'x_points':x_points})
     
@@ -893,9 +893,14 @@ def contour_minmax(c,plot_debug=False):
         theta_in = c['theta_XY'][mask_in]
         x_in_dtheta = np.gradient(X_in,theta_in)
 
-        theta_xmin = interpolate.interp1d(x_in_dtheta,theta_in)(0.)
-        X_min = interpolate.interp1d(theta_in,X_in)(theta_xmin)
-        Y_Xmin = interpolate.interp1d(theta_in,Y_in)(theta_xmin)
+        try:
+            theta_xmin = interpolate.interp1d(x_in_dtheta,theta_in)(0.)
+            X_min = interpolate.interp1d(theta_in,X_in)(theta_xmin)
+            Y_Xmin = interpolate.interp1d(theta_in,Y_in)(theta_xmin)
+        except:
+            i_xmin = np.argmin(X_in)
+            X_min = X_in[i_xmin]
+            Y_Xmin = Y_in[i_xmin]
 
         # compute X_out
         i_out_lower = np.where(c['theta_XY']>=1.5*np.pi)
@@ -915,9 +920,15 @@ def contour_minmax(c,plot_debug=False):
         theta_out = np.hstack((c['theta_XY'][i_out_lower],c['theta_XY'][i_out_upper]+2*np.pi))
         x_out_dtheta = np.gradient(X_out,theta_out)
 
-        theta_xmax = interpolate.interp1d(x_out_dtheta,theta_out)(0.)
-        X_max = interpolate.interp1d(theta_out,X_out)(theta_xmax)
-        Y_Xmax = interpolate.interp1d(theta_out,Y_out)(theta_xmax)
+        try:
+            theta_xmax = interpolate.interp1d(x_out_dtheta,theta_out)(0.)
+            X_max = interpolate.interp1d(theta_out,X_out)(theta_xmax)
+            Y_Xmax = interpolate.interp1d(theta_out,Y_out)(theta_xmax)
+        except:
+            i_xmax = np.argmax(X_out)
+            X_max = X_out[i_xmax]
+            Y_Xmax = Y_out[i_xmax]
+        
 
         c.update({'X_Ymax':float(X_Ymax),'Y_max':float(Y_max),
                 'X_Ymin':float(X_Ymin),'Y_min':float(Y_min),
