@@ -766,8 +766,8 @@ def contour_center(c):
         c = contour_minmax(c)
 
     # compute the minor and major radii of the contour at the average elevation
-    c['r'] = (c['X_out']-c['X_in'])/2
-    c['X0'] = (c['X_out']+c['X_in'])/2
+    c['r'] = (c['X_max']-c['X_min'])/2
+    c['X0'] = (c['X_max']+c['X_min'])/2
 
     # compute the average elevation (midplane) of the contour bounding box
     c['Y0'] = (c['Y_max'] + c['Y_min'])/2
