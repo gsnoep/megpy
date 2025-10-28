@@ -849,16 +849,8 @@ class Equilibrium():
                         B_pol_fs = 0.0
                         B_tor_fs = lcfs['fpol'] / lcfs['R0']
                         if len(lcfs['R']) > 5:
-                            # to speed up the Bpol interpolation generate a reduced Z,R mesh
-                            i_R_in = find(lcfs['R_in'],self.derived['R'])-2
-                            i_R_out = find(lcfs['R_out'],self.derived['R'])+2
-                            i_Z_min = find(lcfs['Z_min'],self.derived['Z'])-2
-                            i_Z_max = find(lcfs['Z_max'],self.derived['Z'])+2
-                            R_mesh,Z_mesh = np.meshgrid(self.derived['R'][i_R_in:i_R_out],self.derived['Z'][i_Z_min:i_Z_max])
-                            RZ_mesh = np.column_stack((Z_mesh.flatten(),R_mesh.flatten()))
-
                             # interpolate Bpol and Btor
-                            B_pol_fs = interpolate.griddata(RZ_mesh,self.derived['B_pol_rz'][i_Z_min:i_Z_max,i_R_in:i_R_out].flatten(),(lcfs['Z'],lcfs['R']),method='cubic')
+                            B_pol_fs = interpolate.RectBivariateSpline(self.derived['Z'], self.derived['R'], self.derived['B_pol_rz'], kx=3, ky=3, s=0)(lcfs['Z'], lcfs['R'], grid=False)
                             B_tor_fs = interpolate.interp1d(self.derived['psi'],self.derived['fpol'],bounds_error=False)(np.array([psi_fs]))[0]/lcfs['R']
                         lcfs.update({'Bpol':B_pol_fs, 'Btor':B_tor_fs, 'B':np.sqrt(B_pol_fs**2+B_tor_fs**2)})
 
