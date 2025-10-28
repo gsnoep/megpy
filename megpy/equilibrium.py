@@ -721,7 +721,8 @@ class Equilibrium():
                                 _key = (key.replace('X','R')).replace('Y','Z')
                                 fs[_key] = fs.pop(key)
                         del fs['level']
-                        del fs['contours']
+                        if 'contours' in fs:
+                            del fs['contours']
                         if not np.isfinite(fs['r']):
                             r_res = np.sqrt((R[i_rmaxis] - derived['rmaxis']) ** 2 + (Z[i_zmaxis] - derived['zmaxis']) ** 2)
                             fs['r'] = r_res * (psi_fs - derived['simag']) / (psirz[i_zmaxis,i_rmaxis] - derived['simag'])
