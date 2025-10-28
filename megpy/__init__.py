@@ -9,13 +9,15 @@ if sys.version_info < (3,8):
     raise Exception("megpy does not support Python < 3.8")
 
 from .equilibrium import Equilibrium
+from .fluxsurface import FluxSurface
 from .localequilibrium import LocalEquilibrium
 from .tracer import *
 
 
 __all__= [
     "Equilibrium",
-    "LocalEquilibrium"
+    "FluxSurface",
+    "LocalEquilibrium",
 ]
 
 try:
