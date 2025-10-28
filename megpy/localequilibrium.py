@@ -56,7 +56,6 @@ class LocalEquilibrium():
                              'param_initial':list(np.zeros(2))+([1,0.,0.,1]+[0.,0.,0.,0.]*(n_harmonics-1)),
                              'param_bounds':[[0,-np.inf]+[-1]*(4*n_harmonics),[np.inf,np.inf]+[1]*(4*n_harmonics)],
                              'param_labels':['R0','Z0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
-                             #'param_labels':['aR_0','aZ_0']+[label for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
                              'deriv_initial':list(np.ones(2+4*n_harmonics)),
                              'deriv_bounds':[-np.inf,np.inf],
                              'deriv_labels':['d{}dr'.format(label) for label in ['R0','Z0']]+['d{}dr'.format(label) for sublist in [['aR_{}'.format(n),'bR_{}'.format(n),'aZ_{}'.format(n),'bZ_{}'.format(n)] for n in range(1,n_harmonics+1)] for label in sublist],
@@ -156,16 +155,16 @@ class LocalEquilibrium():
                 # set the default n_theta (interpolating only once in between the traced flux-surface grid points)
                 if n_theta == 'default':
                     self.n_theta = 2 * len(self.eq.fluxsurfaces['R'][self.x_grid.index(self.x_loc)])
-                    self.theta = np.linspace(theta_min,theta_max,self.n_theta)
+                    self.theta = np.linspace(theta_min,theta_max,self.n_theta)*2*np.pi
                     if self._param == 'miller_general':
                         self.theta = np.linspace(0,2,self.n_theta)*np.pi
 
                 # modifications for MXH and Fourier
                 if self._param == 'mxh':
-                    self.fs['R0'] = (np.max(self.fs['R'][:-1])+np.min(self.fs['R'][:-1]))/2
-                    self.fs['Z0'] = (np.max(self.fs['Z'][:-1])+np.min(self.fs['Z'][:-1]))/2
-                    self.fs['r'] = (np.max(self.fs['R'][:-1])-np.min(self.fs['R'][:-1]))/2
-                    self.fs['kappa'] = ((np.max(self.fs['Z'][:-1])-np.min(self.fs['Z'][:-1]))/2)/self.fs['r']
+                    self.fs['R0'] = (np.max(self.fs['R'])+np.min(self.fs['R']))/2
+                    self.fs['Z0'] = (np.max(self.fs['Z'])+np.min(self.fs['Z']))/2
+                    self.fs['r'] = (np.max(self.fs['R'])-np.min(self.fs['R']))/2
+                    self.fs['kappa'] = ((np.max(self.fs['Z'])-np.min(self.fs['Z']))/2)/self.fs['r']
 
                     self.theta = arcsin2pi((self.fs['Z'][:-1]-self.fs['Z0'])/(self.fs['kappa']*self.fs['r']))
                     self.n_theta = len(self.theta)
