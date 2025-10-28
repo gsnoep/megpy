@@ -5,6 +5,7 @@ import xarray as xr
 from scipy import integrate,interpolate
 from scipy.optimize import least_squares
 
+from .localequilibrium import LocalEquilibrium
 from .tracer import *
 from .utils import *
 
@@ -13,7 +14,7 @@ class FluxSurface():
     def __init__(self):
         self.n_theta = 360
         self.n_harmonics = 5 #12
-        self.theta = np.linspace(-1,1,self.n_theta) * np.pi
+        self.theta = np.linspace(0,2,self.n_theta) * np.pi
 
         self.data = xr.DataArray()
 
@@ -57,21 +58,34 @@ class FluxSurface():
 
     #    return
 
-    def from_tracer(self,grid_R,grid_Z,field,level,k='l',m_axis=None,xpoint=False):
-        fs = contour(grid_R,grid_Z,field,level,kind=k,ref_point=m_axis,x_point=xpoint)
+    def from_tracer(self,grid_R,grid_Z,field,level,k='l',m_axis=None,xpoint=False,analytic_shape=False):
+        self.fs = contour(grid_R,grid_Z,field,level,kind=k,ref_point=m_axis,x_point=xpoint)
 
-        self.R = fs['X']
-        self.Z = fs['Y']
-        self.theta_RZ = fs['theta_XY']
+        keys = copy.deepcopy(list(self.fs.keys()))
+        for key in keys:
+            if 'X' in key or 'Y' in key:
+                _key = (key.replace('X','R')).replace('Y','Z')
+                self.fs[_key] = self.fs.pop(key)
 
-        self.Z_max = fs['Y_max']
-        self.Z_min = fs['Y_min']
+        self.R = self.fs['R']
+        self.Z = self.fs['Z']
+        self.theta_RZ = self.fs['theta_RZ']
+
+        self.n_theta = len(self.theta_RZ)
+
+        self.Z_max = self.fs['Z_max']
+        self.Z_min = self.fs['Z_min']
         
-        self.R0 = fs['X0']
-        self.Z0 = fs['Y0']
-        self.r = fs['r']
-        #self.R_centroid = fs['Xc']
-        #self.Z_centroid = fs['Yc']
+        self.R0 = self.fs['R0']
+        self.Z0 = self.fs['Z0']
+        self.r = self.fs['r']
+
+        #self.R_centroid = fs['Rc']
+        #self.Z_centroid = fs['Zc']
+
+        if analytic_shape:
+            shape_analytic = LocalEquilibrium.extract_analytic_shape(self.fs)
+            self.shape_analytic = [self.fs['R0'],self.fs['Z0'],self.fs['r'],shape_analytic['kappa'],shape_analytic['delta'],shape_analytic['zeta']]
 
         return
 
@@ -182,9 +196,12 @@ class FluxSurface():
 
         return
 
-    def to_turnbull(self,):
+    def to_turnbull(self,initial=None):
         # set initial condition and bounds
-        self.param_initial = [0.,0.,0.,1.,0.,0.]
+        if initial is None:
+            self.param_initial = [0.,0.,0.,1.,0.,0.]
+        else:
+            self.param_initial = initial
         self.param_bounds = ([0.,-np.inf,0.,0.,-1,-0.5],[np.inf,np.inf,np.inf,np.inf,1,0.5])
 
         def cost(shape):
