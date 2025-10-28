@@ -713,32 +713,41 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
             deltas = contours[0] - ref_point
         else:
             deltas = contours[0] - np.mean(np.vstack((contours[0], contours[0][0])),axis=0)
-
-        theta_xy = np.arctan2(deltas[:,1], deltas[:,0])
-        theta_xy = np.mod(theta_xy, 2*np.pi)
+        
+        theta_xy = arctan2pi(deltas[:,1], deltas[:,0])
         i_sort_theta = np.argsort(theta_xy)
         contours[0] = contours[0][i_sort_theta]
         theta_xy = theta_xy[i_sort_theta]
-        if to_close[0]:
-            theta_xy = np.hstack((theta_xy,theta_xy[0]))
-        
-        # update contours: close those that meet the condition
-        contours = [np.vstack((contour, contour[0])) if to_close[i] else contour for i, contour in enumerate(contours)]
 
         contours = [(contour[:,0],contour[:,1]) for contour in contours]
+
+        # obtain contour center and centroid coordinates 
+        contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'contours':[np.vstack((contour, contour[0])) if to_close[i] else contour for i, contour in enumerate(contours)]}
+        if x_point and np.any(x_points):
+            contours.update({'x_points':x_points})
+        
+        contours = contour_center(contours)
+        contours = contour_centroid(contours)
+
+        # zipsort the contour from 0 - 2 pi around the geometric center
+        contours['theta_XY'] = arctan2pi(contours['Y'] - contours['Y0'], contours['X'] - contours['X0'])
+        contours['theta_XY'], contours['X'], contours['Y'] = zipsort(contours['theta_XY'], contours['X'], contours['Y'])
+
+        # close the contour
+        if to_close[0]:
+            contours['theta_XY'] = np.append(contours['theta_XY'],contours['theta_XY'][0])
+            contours['X'] = np.append(contours['X'],contours['X'][0])
+            contours['Y'] = np.append(contours['Y'],contours['Y'][0])
 
     else:
         x_coordinates = np.array([])
         y_coordinates = np.array([])
         
         contours = [(x_coordinates, y_coordinates)]
-    
-    contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'contours':contours}
-    if x_point and np.any(x_points):
-        contours.update({'x_points':x_points})
-    
-    contours = contour_center(contours)
-    contours = contour_centroid(contours)
+        contours = [(contour[:,0],contour[:,1]) for contour in contours]
+
+        # obtain contour center and centroid coordinates from 
+        contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':np.array([]), 'level':level, 'contours':contours}
 
     return contours
 
@@ -765,9 +774,9 @@ def contour_center(c):
     if 'X_in' not in c or 'X_out' not in c or 'Y_min' not in c or 'Y_max' not in c or 'X_min' not in c or 'X_max' not in c:
         c = contour_minmax(c)
 
-    # compute the minor and major radii of the contour at the average elevation
-    c['r'] = (c['X_max']-c['X_min'])/2
-    c['X0'] = (c['X_max']+c['X_min'])/2
+    # compute the minor and major radii of the contour
+    c['r'] = (c['X_out']-c['X_in'])/2
+    c['X0'] = (c['X_out']+c['X_in'])/2
 
     # compute the average elevation (midplane) of the contour bounding box
     c['Y0'] = (c['Y_max'] + c['Y_min'])/2
@@ -824,7 +833,7 @@ def contour_minmax(c,plot_debug=False):
         
         # check for or compute theta_XY
         if 'theta_XY' not in c:
-            c['theta_XY'] = np.mod(np.arctan2(c['Y']-np.mean(c['Y']), c['X']-np.mean(c['X'])),2*np.pi)
+            c['theta_XY'] = arctan2pi(c['Y']-np.mean(c['Y']), c['X']-np.mean(c['X']))
 
         # compute X_Ymax, Y_max and X_Ymin, Y_min
         i_Y_max = np.argmax(c['Y'])
