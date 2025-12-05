@@ -189,7 +189,8 @@ def sort2d(x, y, ref_point=None, threshold=None, start='farthest', metric='eucli
             current_idx = segment_indices[-1]
             dists = dist_matrix[current_idx].copy()
             dists[used] = np.inf
-            dists[dists == 0] = np.inf  # exclude duplicate points (zero distance)
+            if x_point:
+                dists[dists == 0] = np.inf  # exclude duplicate points (zero distance) to self-intersect at x-points
             next_idx = np.argmin(dists)
             
             # check if all points are used or if the next point is too far
