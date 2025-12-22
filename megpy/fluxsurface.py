@@ -79,6 +79,7 @@ class FluxSurface():
         self.R0 = self.fs['R0']
         self.Z0 = self.fs['Z0']
         self.r = self.fs['r']
+        self.kappa = ((self.Zmax-self.Zmin)/2)/self.r
 
         #self.R_centroid = fs['Rc']
         #self.Z_centroid = fs['Zc']
@@ -136,11 +137,11 @@ class FluxSurface():
     
     # convert to analytical flux surface
     def to_mxh(self,optimize=True):
-        self.kappa = ((self.Zmax-self.Zmin)/2)/self.r
-        #self.theta = arcsin2pi(np.clip((self.Z-self.Z0)/(self.kappa*self.r),-1,1))
-        self.theta = np.arcsin(np.clip((self.Z-self.Z0)/(self.kappa*self.r),-1,1))
-        
         if optimize:
+            # set theta grid
+            self.theta = arcsin2pi(np.clip((self.Z-self.Z0)/(self.kappa*self.r),-1,1))
+            self.n_theta = len(self.theta)
+            
             # set initial condition and bounds
             self.param_initial = [0.,0.,0.,1.,0.]+list(np.zeros(2*self.n_harmonics))
             self.param_bounds = [[0.,-np.inf,0.,0.,-2*np.pi]+list(-np.inf*np.ones(2*self.n_harmonics)),[np.inf,np.inf,np.inf,np.inf,2*np.pi]+list(np.inf*np.ones(2*self.n_harmonics))]
@@ -151,7 +152,7 @@ class FluxSurface():
             def cost(shape):
                 # compute the flux-surface parameterization for a given shape set `params`
                 self.R_param, self.Z_param, self.theta_ref = self.mxh(shape, self.theta, norm=True)
-                
+
                 # define the cost function
                 L1_norm = np.abs(np.array([self.R_param,self.Z_param])-np.array([self.R_ref,self.Z_ref])).flatten()
                 L2_norm = np.sqrt((self.R_param-self.R_ref)**2+(self.Z_param-self.Z_ref)**2)
@@ -166,7 +167,8 @@ class FluxSurface():
                                 gtol=self.tolerance, 
                                 loss='soft_l1', 
                                 verbose=0)
-            self.shape = lsq['x']
+            self.shape = lsq.x
+            self.R_param, self.Z_param, self.theta_ref = self.mxh(self.shape, self.theta, norm=False)
 
         else:
             # solve for polar angles
@@ -177,6 +179,7 @@ class FluxSurface():
             theta_r_cont[-1] = theta_r_cont[0]
 
             self.theta = theta_cont
+            self.n_theta = len(self.theta)
 
             # fourier decomposition
             c_n, s_n = np.zeros(self.n_harmonics+1), np.zeros(self.n_harmonics+1)
@@ -246,6 +249,11 @@ class FluxSurface():
 
         if theta is None:
             theta = self.theta
+        
+        self.R0 = self.fs['R0']
+        self.Z0 = self.fs['Z0']
+        self.r = self.fs['r']
+        self.kappa = ((self.Zmax-self.Zmin)/2)/self.r
 
         # extract bounding box values
         shape[:4] = [self.R0,self.Z0,self.r,self.kappa]
@@ -265,7 +273,7 @@ class FluxSurface():
         R_param = self.R0 + self.r * np.cos(theta_R)
         Z_param = self.Z0 + self.kappa * self.r * np.sin(theta)
 
-        theta_ref = np.mod(np.arctan2(Z_param-self.Z0, R_param-self.R0), 2*np.pi)
+        theta_ref = arctan2pi(Z_param-self.Z0, R_param-self.R0)
 
         if norm:
             R_param-=self.R0
