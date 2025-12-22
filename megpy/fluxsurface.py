@@ -73,8 +73,8 @@ class FluxSurface():
 
         self.n_theta = len(self.theta_RZ)
 
-        self.Z_max = self.fs['Z_max']
-        self.Z_min = self.fs['Z_min']
+        self.Zmax = self.fs['Z_max']
+        self.Zmin = self.fs['Z_min']
         
         self.R0 = self.fs['R0']
         self.Z0 = self.fs['Z0']
@@ -84,8 +84,8 @@ class FluxSurface():
         #self.Z_centroid = fs['Zc']
 
         if analytic_shape:
-            shape_analytic = LocalEquilibrium.extract_analytic_shape(self.fs)
-            self.shape_analytic = [self.fs['R0'],self.fs['Z0'],self.fs['r'],shape_analytic['kappa'],shape_analytic['delta'],shape_analytic['zeta']]
+            self.miller_analytic = LocalEquilibrium.extract_analytic_shape(self.fs)
+            self.shape_analytic = [self.fs['R0'],self.fs['Z0'],self.fs['r'],self.miller_analytic['kappa'],self.miller_analytic['delta'],self.miller_analytic['zeta']]
 
         return
 
