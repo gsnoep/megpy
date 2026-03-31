@@ -90,10 +90,13 @@ class FluxSurface():
 
         return
 
-    def from_RZ(self,R,Z):
+    def from_RZ(self,R,Z,R0,Z0):
         self.R = R
         self.Z = Z
-        self.theta_RZ = np.mod(np.arctan2(self.Z-np.mean(self.Z),self.R-np.mean(self.R)),2*np.pi)
+        self.theta_RZ = np.mod(np.arctan2(self.Z-Z0,self.R-R0),2*np.pi)
+
+        self.n_theta = 2*len(self.R)
+        self.theta = np.linspace(0,2,self.n_theta) * np.pi
 
         fs = contour_center({'X':self.R, 'Y':self.Z, 'theta_XY':self.theta_RZ})
 
@@ -101,6 +104,8 @@ class FluxSurface():
         self.Z0 = fs['Y0']
         self.r = fs['r']
 
+        self.R_Zmax = fs['X_Ymax']
+        self.R_Zmin = fs['X_Ymin']
         self.Zmax = fs['Y_max']
         self.Zmin = fs['Y_min']
 
@@ -128,10 +133,35 @@ class FluxSurface():
 
         return
 
+    def from_miller(self,shape=None):
+        if shape is None:
+            shape = self.shape
+        self.R, self.Z, self.theta_ref = self.miller(shape,self.theta)
+
+        fs = contour_center({'X':self.R, 'Y':self.Z, 'theta_XY':self.theta_ref})
+
+        self.R0 = fs['X0']
+        self.Z0 = fs['Y0']
+        self.r = fs['r']
+
+        self.Zmax = fs['Y_max']
+        self.Zmin = fs['Y_min']
+
+        return
+
     def from_turnbull(self,shape=None):
         if shape is None:
             shape = self.shape
         self.R, self.Z, self.theta_ref = self.turnbull(shape,self.theta)
+
+        fs = contour_center({'X':self.R, 'Y':self.Z, 'theta_XY':self.theta_ref})
+
+        self.R0 = fs['X0']
+        self.Z0 = fs['Y0']
+        self.r = fs['r']
+
+        self.Zmax = fs['Y_max']
+        self.Zmin = fs['Y_min']
 
         return
     
@@ -195,7 +225,41 @@ class FluxSurface():
 
             self.shape = np.array([self.R0,self.Z0,self.r,self.kappa,c_n[0]]+list(np.array([[c_n[i],s_n[i]] for i in range(1,self.n_harmonics+1)]).flatten()))
 
-            self.R_param, self.Z_param, self.theta_ref = self.mxh(self.shape, self.theta, norm=True)
+            self.R_param, self.Z_param, self.theta_ref = self.mxh(self.shape, self.theta, norm=False)
+
+        return
+
+    def to_miller(self,initial=None):
+        # set initial condition and bounds
+        if initial is None:
+            self.param_initial = [0.,0.,0.,1.,0.]
+        else:
+            self.param_initial = initial
+        self.param_bounds = ([0.,-np.inf,0.,0.,-1],[np.inf,np.inf,np.inf,np.inf,1])
+
+        def cost(shape):
+            # compute the flux-surface parameterization for a given shape set `params`
+            self.R_param, self.Z_param, self.theta_ref = self.miller(shape, self.theta, norm=True)
+
+            self.R_ref = np.array(interpolate_periodic(self.theta_RZ, self.R, self.theta_ref)) - self.R0
+            self.Z_ref = np.array(interpolate_periodic(self.theta_RZ, self.Z, self.theta_ref)) - self.Z0
+
+            # define the cost function
+            L1_norm = np.abs(np.array([self.R_param,self.Z_param])-np.array([self.R_ref,self.Z_ref])).flatten()
+            L2_norm = np.sqrt((self.R_param-self.R_ref)**2+(self.Z_param-self.Z_ref)**2)
+
+            return self.n_theta*np.hstack((L1_norm,L2_norm))
+
+        lsq = least_squares(cost, 
+                            self.param_initial, 
+                            bounds=self.param_bounds, 
+                            ftol=self.tolerance, 
+                            xtol=self.tolerance, 
+                            gtol=self.tolerance, 
+                            loss='soft_l1', 
+                            verbose=1)
+        self.shape = lsq['x']
+        self.R_param, self.Z_param, self.theta_ref = self.miller(self.shape, self.theta, norm=False)
 
         return
 
@@ -219,7 +283,7 @@ class FluxSurface():
             L2_norm = np.sqrt((self.R_param-self.R_ref)**2+(self.Z_param-self.Z_ref)**2)
 
             return self.n_theta*np.hstack((L1_norm,L2_norm))
-        
+
         lsq = least_squares(cost, 
                             self.param_initial, 
                             bounds=self.param_bounds, 
@@ -227,11 +291,12 @@ class FluxSurface():
                             xtol=self.tolerance, 
                             gtol=self.tolerance, 
                             loss='soft_l1', 
-                            verbose=0)
+                            verbose=1)
         self.shape = lsq['x']
+        self.R_param, self.Z_param, self.theta_ref = self.turnbull(self.shape, self.theta, norm=False)
 
         return
-    
+
     # analytical flux surface descriptions
     def mxh(self,shape,theta=None,norm=False):
         """Compute MXH flux-surface parameterization given a set of shape parameters and a theta-grid.
@@ -334,6 +399,74 @@ class FluxSurface():
         else:
             return J_r
 
+    def miller(self,shape,theta,norm=False):
+        """Compute Miller flux-surface parameterization given a set of shape parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Miller shape parameters [R0,Z0,r,kappa,delta].
+            theta (array): 1D array containing the theta-grid.
+            norm (bool, optional): Normalize the parameterized flux-surface coordinates by the center coordinates. Defaults to False.
+
+        Returns:
+            - R_param (array): 1D array containing the radial flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - Z_param (array): 1D array containing the vertical flux-surface parameterization coordinate sorted by theta_ref [0,2*pi].
+            - theta_ref (array): 1D array containing the poloidal angle between radial and vertical flux-surface parameterization coordinates sorted ascending.
+        """
+        # flux-surface coordinate parameterization from [Miller PoP 5 (1998)] with Z0 added
+        Ro, Zo, r, kappa, delta = shape
+        with np.errstate(invalid='ignore'):
+            x = np.arcsin(delta)
+        theta_R = theta + x * np.sin(theta)
+
+        R_param = Ro + r * np.cos(theta_R)
+        Z_param = Zo + kappa * r * np.sin(theta)
+
+        theta_ref = arctan2pi(Z_param-Zo,R_param-Ro)
+        if norm:
+            R_param-=self.R0
+            Z_param-=self.Z0
+        
+        return R_param, Z_param, theta_ref
+
+    def miller_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
+        """Compute Miller flux-surface parameterization Jacobian given sets of shape and shape derivative parameters and a theta-grid.
+
+        Args:
+            shape (array): 1D array or list containing the Miller shape parameters [R0,Z0,r,kappa,delta].
+            shape_deriv (array): 1D array or list containing the Miller shape derivative parameters [dR0dr,dZ0dr,s_kappa,s_delta].
+            theta (array): 1D array containing the theta-grid.
+            R (array): 1D array containing the radial flux-surface coordinate as output by miller().
+            return_deriv (bool, optional): Switch to return the radial and poloidal derivatives in addition to the Jacobian or not. Defaults to True.
+
+        Returns:
+            dRdtheta (array, optional): 1D array containing the poloidal derivative of the radial flux-surface coordinate.
+            dZdtheta (array, optional): 1D array containing the poloidal derivative of the vertical flux-surface coordinate.
+            dRdr (array, optional): 1D array containing the radial derivative of the radial flux-surface coordinate.
+            dZdr (array, optional): 1D array containing the radial derivative of the vertical flux-surface coordinate.
+            J_r (array): 1D array containing the Jacobian for the Miller parameterization.
+        """
+
+        # define the parameters
+        [R0,Z0,r,kappa,delta] = shape
+        [dR0dr,dZ0dr,s_kappa,s_delta] = shape_deriv
+        with np.errstate(invalid='ignore'):
+            x = np.arcsin(delta)
+        theta_R = theta + x * np.sin(theta)
+
+        # compute the derivatives for the Jacobian
+        dRdtheta = - r * np.sin(theta_R)*(1 + x * np.cos(theta))
+        dZdtheta = kappa * r * np.cos(theta)
+        dRdr = dR0dr + np.cos(theta_R) - s_delta * np.sin(theta) * np.sin(theta_R)
+        dZdr = dZ0dr + kappa * (s_kappa + 1) * np.sin(theta)
+
+        # compute the Jacobian
+        J_r = R * (dRdr * dZdtheta - dRdtheta * dZdr)
+
+        if return_deriv:
+            return dRdtheta, dZdtheta, dRdr, dZdr, J_r
+        else:
+            return J_r
+
     def turnbull(self,shape,theta=None,norm=False):
         """Compute Turnbull-Miller flux-surface parameterization given a set of shape parameters and a theta-grid.
 
@@ -352,7 +485,7 @@ class FluxSurface():
         if theta is None:
             theta = self.theta
 
-        R0, Z0, r, kappa, delta, zeta = shape
+        Ro, Zo, r, kappa, delta, zeta = shape
         
         with np.errstate(invalid='ignore'):
             x = np.arcsin(delta)
@@ -362,17 +495,17 @@ class FluxSurface():
         theta_Z = theta + zeta * np.sin(2 * theta)
 
         # compute flux surface R, Z coordinates
-        R_param = R0 + r * np.cos(theta_R)
-        Z_param = Z0 + kappa * r * np.sin(theta_Z)
+        R_param = Ro + r * np.cos(theta_R)
+        Z_param = Zo + kappa * r * np.sin(theta_Z)
         
-        theta_ref = np.mod(np.arctan2(Z_param-Z0,R_param-R0), 2*np.pi)
+        theta_ref = np.mod(np.arctan2(Z_param-Zo,R_param-Ro), 2*np.pi)
 
         if norm:
             R_param-=self.R0
             Z_param-=self.Z0
         
         return R_param, Z_param, theta_ref
-    
+
     def turnbull_jr(self,shape,shape_deriv,theta,R,return_deriv=True):
         """Compute Turnbull-Miller flux-surface parameterization Jacobian given sets of shape and shape derivative parameters and a theta-grid.
 
@@ -424,7 +557,7 @@ class FluxSurface():
             x = np.arcsin(delta)
 
         #TODO fix this
-        theta_in = theta[np.where((theta>=0.5*np.pi)&(theta<=1.5*np.pi))]
+        theta_in = theta[np.where((theta<=0.5*np.pi)&(theta>=1.5*np.pi))]
         theta_out = np.hstack((theta[np.where((theta>=0.5*np.pi)&(theta<=1.5*np.pi))],))
         
         # compute poloidal angle shape modifications
