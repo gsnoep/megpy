@@ -528,7 +528,7 @@ class Equilibrium():
         derived = self.derived
 
         # check refine requirements
-        if refine:
+        if refine and refine>1:
             self.refine = refine
             self.refine_equilibrium(nw=int(refine*raw['nw']),nh=int(refine*raw['nh']))
         else:
