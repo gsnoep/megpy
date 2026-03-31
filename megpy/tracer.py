@@ -561,10 +561,13 @@ def null_classifier(nulls, x, y, field, level=None, rtol=5e-4, atol=1e-3, delta=
         else:
             o_mask = np.abs(o_values - level) <= atol
             x_mask = np.abs(x_values - level) <= atol
+
         o_points = o_points[o_mask]
+        o_values = o_values[o_mask]
         x_points = x_points[x_mask]
-    
-    return {'o-points': o_points, 'x-points': x_points}
+        x_values = x_values[x_mask]
+
+    return {'o-points': o_points, 'o-values':o_values, 'x-points': x_points, 'x-values': x_values}
 
 def find_x_points(x, y, field, level=None, rtol=5e-4, atol=1e-3):
     """
@@ -582,7 +585,12 @@ def find_x_points(x, y, field, level=None, rtol=5e-4, atol=1e-3):
         numpy.ndarray: Array of shape (m, 2) containing [x, y] coordinates of X-points.
     """
     nulls = find_nulls(x, y, field)
-    return null_classifier(nulls, x, y, field, level=level, rtol=rtol, atol=atol)['x-points']
+    nulls_classified = null_classifier(nulls, x, y, field, level=level, rtol=rtol, atol=atol)
+
+    if np.any(nulls_classified['x-points']):
+        return nulls_classified['x-points'], nulls_classified['x-values']
+    else:
+        return np.array([]).reshape(0, 2), np.array([])
 
 def find_o_points(x, y, field, level=None, rtol=1e-3, atol=1e-3):
     """
@@ -600,7 +608,9 @@ def find_o_points(x, y, field, level=None, rtol=1e-3, atol=1e-3):
         numpy.ndarray: Array of shape (m, 2) containing [x, y] coordinates of O-points.
     """
     nulls = find_nulls(x, y, field)
-    o_points = null_classifier(nulls, x, y, field, level=level, rtol=rtol, atol=atol)['o-points']
+    nulls_classified = null_classifier(nulls, x, y, field, level=level, rtol=rtol, atol=atol)
+    o_points = nulls_classified['o-points']
+    o_values = nulls_classified['o-values']
     
     # if no o-points can be found > refine the field
     if not np.any(o_points):
@@ -613,9 +623,11 @@ def find_o_points(x, y, field, level=None, rtol=1e-3, atol=1e-3):
         _field = interpolate.griddata(old_xy,field.flatten(),(np.meshgrid(_x,_y)),method='cubic')
     
         _nulls = find_nulls(_x, _y, _field)
-        o_points = null_classifier(_nulls, _x, _y, _field, level=level, rtol=rtol, atol=atol)['o-points']
+        _nulls_classified = null_classifier(_nulls, _x, _y, _field, level=level, rtol=rtol, atol=atol)
+        o_points = _nulls_classified['o-points']
+        o_values = _nulls_classified['o-values']
 
-    return o_points
+    return o_points, o_values
 
 def find_null_points(x, y, field, level=None, rtol=1e-3, atol=1e-3):
     """
@@ -660,6 +672,8 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         x_coordinates = np.concatenate([x_rows, x_cols])
         y_coordinates = np.concatenate([y_rows, y_cols])
 
+        #TODO: mask out duplicate points before or during sorting if not x-point
+
         # get grid spacing (assuming equidistant grid)
         dx = x[1] - x[0]
         dy = y[1] - y[0]
@@ -669,21 +683,23 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         y_edges = [y[0], y[-1]]
 
         # set nearest neighbor threshold
+        radius = 0.
         threshold = np.sqrt((1.5 * dx)**2 + (1.5 * dy)**2)
 
-        # handle x-points in the contour
         if x_point:
-            x_points = find_x_points(x, y, field, level)
+            x_points, x_values = find_x_points(x, y, field, level)
 
             if np.any(x_points):
+                # compute the distances of all contour points to the x-point(s)
+                x_distances = np.sort(np.sqrt((x_coordinates[:, None] - x_points[:, 0])**2 + (y_coordinates[:, None] - x_points[:, 1])**2),axis=0)
+
                 # compute elimination radius
-                radius = np.sqrt((1 * dx)**2 + (1 * dy)**2)
+                radius = np.mean(x_distances[:10])+np.std(x_distances[:10])
 
                 # increase threshold
-                threshold = np.sqrt((2 * dx)**2 + (2 * dy)**2)
+                threshold = 2*radius
 
                 # eliminate points inside radius around an x-point to avoid jagged x-point approaches
-                x_distances = np.sqrt((x_coordinates[:, None] - x_points[:, 0])**2 + (y_coordinates[:, None] - x_points[:, 1])**2)
                 mask = np.all(x_distances > radius, axis=1)
                 x_coordinates = np.concatenate([x_coordinates[mask], np.repeat(x_points[:, 0], 2)])
                 y_coordinates = np.concatenate([y_coordinates[mask], np.repeat(x_points[:, 1], 2)])
@@ -723,7 +739,7 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         contours = [(contour[:,0],contour[:,1]) for contour in contours]
 
         # obtain contour center and centroid coordinates 
-        contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'contours':[np.vstack((contour, contour[0])) if to_close[i] else contour for i, contour in enumerate(contours)]}
+        contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':theta_xy, 'level':level, 'contours':[np.vstack((contour, contour[0])) if to_close[i] else contour for i, contour in enumerate(contours)], 'radius':radius}
         if x_point and np.any(x_points):
             contours.update({'x_points':x_points})
         
@@ -748,7 +764,7 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
         contours = [(contour[:,0],contour[:,1]) for contour in contours]
 
         # obtain contour center and centroid coordinates from 
-        contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':np.array([]), 'level':level, 'contours':contours}
+        contours = {'X':contours[0][0], 'Y':contours[0][1], 'theta_XY':np.array([]), 'level':level, 'contours':contours, 'radius':radius}
 
     return contours
 
