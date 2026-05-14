@@ -691,10 +691,12 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
 
             if np.any(x_points):
                 # compute the distances of all contour points to the x-point(s)
-                x_distances = np.sort(np.sqrt((x_coordinates[:, None] - x_points[:, 0])**2 + (y_coordinates[:, None] - x_points[:, 1])**2),axis=0)
+                x_distances = np.sqrt((x_coordinates[:, None] - x_points[:, 0])**2 + (y_coordinates[:, None] - x_points[:, 1])**2)
+
+                x_dist_sort = np.sort(x_distances,axis=0)
 
                 # compute elimination radius
-                radius = np.mean(x_distances[:10])+np.std(x_distances[:10])
+                radius = np.mean(x_dist_sort[:10])+np.std(x_dist_sort[:10])
 
                 # increase threshold
                 threshold = 2*radius
@@ -703,6 +705,7 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
                 mask = np.all(x_distances > radius, axis=1)
                 x_coordinates = np.concatenate([x_coordinates[mask], np.repeat(x_points[:, 0], 2)])
                 y_coordinates = np.concatenate([y_coordinates[mask], np.repeat(x_points[:, 1], 2)])
+                plt.plot(x_coordinates,y_coordinates,'.')
             else:
                 x_point = False
 
