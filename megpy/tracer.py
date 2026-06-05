@@ -705,7 +705,6 @@ def contour(x, y, field, level, kind='l', ref_point=None, x_point=False):
                 mask = np.all(x_distances > radius, axis=1)
                 x_coordinates = np.concatenate([x_coordinates[mask], np.repeat(x_points[:, 0], 2)])
                 y_coordinates = np.concatenate([y_coordinates[mask], np.repeat(x_points[:, 1], 2)])
-                plt.plot(x_coordinates,y_coordinates,'.')
             else:
                 x_point = False
 
