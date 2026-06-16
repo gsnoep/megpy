@@ -258,7 +258,7 @@ class Equilibrium():
                 kk = 0
                 for ii in range(0, eq["nbbbs"]):
                     ff.write("%16.9E" % (eq["rbbbs"][ii]))
-                    if (kk + 1) % maxv == 0 and (ii + 1) != eq["nbbbs"]:
+                    if (kk + 1) % maxv == 0:
                         ff.write("\n")
                     kk = kk + 1
                     ff.write("%16.9E" % (eq["zbbbs"][ii]))
@@ -269,7 +269,7 @@ class Equilibrium():
                 kk = 0
                 for ii in range(0, eq["limitr"]):
                     ff.write("%16.9E" % (eq["rlim"][ii]))
-                    if (kk + 1) % maxv == 0 and (ii + 1) != eq["limitr"]:
+                    if (kk + 1) % maxv == 0:
                         ff.write("\n")
                     kk = kk + 1
                     ff.write("%16.9E" % (eq["zlim"][ii]))
